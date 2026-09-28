@@ -147,6 +147,20 @@ module AydinCreative
         nil
       end
 
+      # ---- 对比用的"SketchUp 原图" -----------------------------------------
+      # 完全按用户当前的 SketchUp 显示样式截（不改任何显示设置：边线、阴影、材质都跟视口一样），
+      # 比例/尺寸跟渲染输入图一致。只给结果窗口的滑动对比条用——喂给 AI 的是下面 textured()
+      # 那张关掉边线的图，那张不适合拿来对比（线脚/角线这类靠边线显示的细节在里面几乎看不见）。
+      def as_is(view, path, opts = {})
+        ar = aspect_value(view, opts[:aspect] || 'window')
+        w, h = dims_for(ar, SOURCE_LONG_EDGE)
+        ok = timed(60, "as_is #{w}x#{h}") { view.write_image(filename: path, width: w, height: h, antialias: true) }
+        ok = timed(60, 'as_is(wh)') { view.write_image(filename: path, width: w, height: h) } if !ok || bad?(path)
+        return nil if bad?(path)
+        clog "as_is: ok #{File.size(path)} bytes"
+        { path: path, w: w, h: h }
+      end
+
       # ---- 渲染的结构输入图 -----------------------------------------
       # 关掉黑色描边/轮廓线，打开材质，按选定比例截一次。
       # AI 会把 SketchUp 的黑线原样保留 → 出图很"CG"，所以截图前必须去掉。

@@ -429,7 +429,10 @@ module AydinCreative
       src = File.join(WORK_DIR, "source_#{stamp}.png")
       cap = step(tr(:s_capture), 0.08) { Capture.textured(v, src, shadows: opts[:shadows], aspect: @aspect) }
       rlog "  src #{File.size(src)} bytes #{cap[:w]}x#{cap[:h]}"
-      @last_source_path = src
+      # 滑动对比条左边放"你在 SketchUp 里看到的样子"，不是给 AI 的那张处理过的截图
+      view_path = File.join(WORK_DIR, "sketchup_#{stamp}.png")
+      as_is = (Capture.as_is(v, view_path, aspect: @aspect) rescue nil)
+      @last_source_path = as_is ? view_path : src
 
       # 线稿：SketchUp 消隐线模式（白面 + 黑细线，跟材质颜色无关）。结构吻合度检查一直用它；
       # 开了结构 LoRA 时它还是图 1（控制图）。
