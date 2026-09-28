@@ -148,8 +148,28 @@ module AydinCreative
 
         found = {}
         SEARCH_FOLDERS.each { |fd| found[fd] = client.models(fd) }
-        { ok: missing.empty?, models: m, missing: missing, seedvr: seed, found: found }
+
+        # 能一键下载的：只有"哪里都没找到"的那几个（放错文件夹的让用户自己挪，不重复下几 GB）
+        downloads = []
+        { unet: !m[:unet] && !m[:ckpt], clip: m[:loader] != :ckpt && !m[:clip],
+          vae: m[:loader] != :ckpt && !m[:vae], control: !m[:control] }.each do |key, need|
+          next unless need
+          folder, rx, name, url = REQUIRED[key]
+          next unless found_elsewhere(client, rx, folder, EXCLUDE[key]).empty?
+          downloads << { folder: folder, name: name, url: url, gb: SIZE_GB[key] }
+        end
+        seedvr_dl = []
+        if seed.nil? && SEEDVR_NODES.all? { |n| client.node?(n) }
+          seedvr_dl << { folder: SEEDVR[:unet][0], name: SEEDVR[:unet][3], url: SEEDVR[:unet][4], gb: 8.3 } unless pick(client.models('diffusion_models'), /seedvr2/i)
+          seedvr_dl << { folder: SEEDVR[:vae][0], name: SEEDVR[:vae][3], url: SEEDVR[:vae][4], gb: 0.5 } unless pick(client.models('vae'), SEEDVR[:vae][1])
+        end
+
+        { ok: missing.empty?, models: m, missing: missing, seedvr: seed, found: found,
+          downloads: downloads, seedvr_downloads: seedvr_dl }
       end
+
+      # 大概体积（GB），只用来在按钮上提示
+      SIZE_GB = { unet: 12.3, clip: 8.0, vae: 0.3, control: 3.1 }.freeze
 
       def missing_line(client, key)
         folder, rx, name, url = REQUIRED[key]

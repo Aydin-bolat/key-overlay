@@ -54,6 +54,10 @@
         state.models = p;
         renderModelStatus();
         break;
+      case 'download':
+        state.download = p;
+        renderDownload();
+        break;
       case 'comfy':
         setComfy(p.online, p.base);
         break;
@@ -125,7 +129,27 @@
       : '<span class="err">' + esc(T('models_missing')) + '</span>\n' + esc((m.missing || []).join('\n'));
     html += '\n' + (m.seedvr ? '<span class="ok">' + esc(T('seedvr_ok')) + '</span>'
       : '<span class="warn">' + esc(T('seedvr_missing')) + '</span>\n' + esc(m.seedvr_hint || ''));
+    var btns = '';
+    if (m.dl_required && m.dl_required.count) btns += '<button class="small" data-dl="required">' + esc(T('dl_required', { n: m.dl_required.count, gb: m.dl_required.gb })) + '</button>';
+    if (m.dl_seedvr && m.dl_seedvr.count) btns += '<button class="small ghost" data-dl="seedvr">' + esc(T('dl_seedvr', { gb: m.dl_seedvr.gb })) + '</button>';
+    if (btns) html += '\n<span class="dl-btns">' + btns + '</span>';
+    html += '<div id="dl-progress"></div>';
     box.innerHTML = html;
+    renderDownload();
+  }
+  function renderDownload() {
+    var el = $('#dl-progress'), d = state.download;
+    if (!el || !d) return;
+    var busy = d.active && !d.done;
+    Array.prototype.forEach.call(document.querySelectorAll('[data-dl]'), function (b) { b.disabled = busy; });
+    if (d.error) { el.innerHTML = '<span class="err">' + esc(T('dl_error') + d.error) + '</span>'; return; }
+    if (d.done && d.cancelled) { el.innerHTML = '<span class="warn">' + esc(T('dl_cancelled')) + '</span>'; return; }
+    if (d.done) { el.innerHTML = '<span class="ok">' + esc(T('dl_done')) + '</span>'; return; }
+    var pct = d.total_mb ? Math.min(100, Math.round(d.got_mb / d.total_mb * 100)) : null;
+    el.innerHTML = esc(T('dl_progress', { i: d.index || 1, n: d.count || 1, file: d.file || '', got: d.got_mb || 0,
+      total: d.total_mb ? d.total_mb : '?', host: d.host || '…' })) +
+      '<div class="dl-track"><div class="dl-fill" style="width:' + (pct == null ? 3 : pct) + '%"></div></div>' +
+      '<button class="small ghost" data-act="cancel_download">' + esc(T('cancel')) + '</button>';
   }
   function saveSettings() {
     state.settings = { engine: $('#engine').value, auto_retry: $('#auto-retry').checked };
@@ -226,6 +250,8 @@
     else if (t.dataset.kind) { state.kind = t.dataset.kind; setSeg('#kind', t); }
     else if (t.dataset.mode) { state.mode = t.dataset.mode; state.presetKey = ''; setSeg('#mode', t); renderPresets(); }
     else if (t.dataset.act === 'cancel_render') call('cancel_render');
+    else if (t.dataset.dl) { state.download = { active: true, index: 1, count: 1, got_mb: 0 }; renderDownload(); call('download_models', t.dataset.dl); }
+    else if (t.dataset.act === 'cancel_download') call('cancel_download');
     else if (t.dataset.act === 'open_log') call('open_log');
     else if (t.dataset.act === 'err-close') $('#err-box').classList.add('hidden');
     else if (t.id === 'analyze-btn') { ev.preventDefault(); $('#analysis').textContent = T('analyzing'); call('analyze'); }

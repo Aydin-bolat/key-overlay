@@ -10,6 +10,7 @@ require File.join(__dir__, 'comfy_client')
 require File.join(__dir__, 'workflow_builder')
 require File.join(__dir__, 'photo_builder')
 require File.join(__dir__, 'geometry_check')
+require File.join(__dir__, 'downloader')
 
 module AydinCreative
   module AiRenderStudio
@@ -131,9 +132,39 @@ module AydinCreative
       r = PhotoBuilder.resolve(client)
       rlog "  models ok=#{r[:ok]} seedvr=#{!r[:seedvr].nil?} #{r[:models]}"
       log_model_folders(r) unless r[:ok]
-      to_js('models', { ok: r[:ok], missing: r[:missing], seedvr: !r[:seedvr].nil?, seedvr_hint: PhotoBuilder.seedvr_hint })
+      @last_resolve = r
+      dl = ->(list) { { count: list.size, gb: list.sum { |x| x[:gb].to_f }.round(1) } }
+      to_js('models', { ok: r[:ok], missing: r[:missing], seedvr: !r[:seedvr].nil?, seedvr_hint: PhotoBuilder.seedvr_hint,
+                        dl_required: dl.call(r[:downloads] || []), dl_seedvr: dl.call(r[:seedvr_downloads] || []),
+                        downloading: !@download.nil? && @download[:active] })
     rescue StandardError => e
       rlog "push_model_status ERROR: #{e.class}: #{e.message}"
+    end
+
+    # ---- 一键下载缺失模型 ----
+    def start_download(which)
+      return if @download && @download[:active]
+      r = @last_resolve || PhotoBuilder.resolve(ComfyClient.new)
+      items = which.to_s == 'seedvr' ? r[:seedvr_downloads] : r[:downloads]
+      items = Array(items)
+      return to_js('download', { error: '没有需要下载的文件', done: true }) if items.empty?
+      log = File.join(WORK_DIR, 'download.log')
+      rlog "download start (#{which}): #{items.map { |x| "#{x[:folder]}/#{x[:name]}" }.join(', ')}"
+      @download = Downloader.start(items, ComfyClient.new, log)
+      UI.stop_timer(@download_timer) if @download_timer
+      @download_timer = UI.start_timer(1.0, true) do
+        st = @download
+        snap = Downloader.snapshot(st)
+        to_js('download', snap)
+        next unless st[:done]
+        UI.stop_timer(@download_timer)
+        @download_timer = nil
+        rlog "download finished error=#{st[:error].inspect} files=#{st[:finished]}"
+        push_model_status # ComfyUI 按目录修改时间刷新文件列表，下完不用重启
+      end
+    rescue StandardError => e
+      rlog "start_download ERROR: #{e.class}: #{e.message}"
+      to_js('download', { error: e.message, done: true })
     end
 
     # 找不到模型时，把 ComfyUI 各模型文件夹里实际有什么全部写进 render.log，方便对照排查
@@ -181,6 +212,8 @@ module AydinCreative
       dlg.add_action_callback('open_log')         { |_c| open_folder(WORK_DIR) }
       dlg.add_action_callback('log')              { |_c, m| rlog "[js] #{m}" }
       dlg.add_action_callback('save_settings')    { |_c, json| save_settings(json) }
+      dlg.add_action_callback('download_models')  { |_c, which| start_download(which) }
+      dlg.add_action_callback('cancel_download')  { |_c| Downloader.cancel(@download) }
     end
 
     def on_ready
@@ -456,8 +489,9 @@ module AydinCreative
       res = step(tr(:s_probe), 0.04) { PhotoBuilder.resolve(client) }
       log_model_folders(res) unless res[:ok]
       unless res[:ok]
-        raise "Z-Image 管线还缺东西（按下面补齐后重启 ComfyUI 再试；或在面板里把引擎切回 RealVisXL）：\n\n" +
-              res[:missing].join("\n")
+        tip = (res[:downloads] || []).empty? ? '' : "\n\n→ 面板右上「本地渲染引擎」下面有「一键下载」按钮，点它会自动下载到 ComfyUI 正确的文件夹。"
+        raise "Z-Image 管线还缺东西（按下面补齐后再试；或在面板里把引擎切回 RealVisXL）：\n\n" +
+              res[:missing].join("\n") + tip
       end
       rlog "  models #{res[:models]} seedvr=#{res[:seedvr] || 'none'}"
 

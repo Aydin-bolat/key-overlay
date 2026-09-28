@@ -42,7 +42,7 @@ SketchUp 真实边线 ─┘   （img2img，边线锁结构）                  
 - ControlNet 也有 2.1 版（`alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1`），放进 `model_patches/` 后插件会优先用它。
 - 显存吃紧的话，SeedVR2 可以换成 3B 版：`seedvr2_3b_int8_convrot.safetensors`，同一个仓库里有。
 - SeedVR2 是可选的。没装的话，插件会用普通放大（ESRGAN + lanczos），照样能出图，只是细节差一些。
-- 插件按文件名自动识别模型，不用改代码。打开渲染面板时，最上面会列出缺哪些文件。
+- 插件按文件名自动识别模型，不用改代码。打开渲染面板时，最上面会列出缺哪些文件，并提供**一键下载**按钮：自动下到 ComfyUI 实际使用的 models 文件夹，连不上 huggingface.co 时自动改用 hf-mirror.com，支持断点续传，下完不用重启 ComfyUI。
 
 国内下载 HuggingFace 慢的话，可以把上面地址里的 `huggingface.co` 换成 `hf-mirror.com`。
 

@@ -6,6 +6,9 @@
     zh: {
       app_title: 'AI 渲染工作室', lang_label: '语言',
       score_label: '结构吻合度 {s}%', score_hint: 'SketchUp 模型的棱边在照片里仍在原位的比例（已扣除随机命中）。越高越贴合模型。',
+      dl_required: '⬇ 一键下载缺失的 {n} 个文件（约 {gb} GB）', dl_seedvr: '⬇ 下载 SeedVR2（约 {gb} GB）',
+      dl_progress: '下载中 {i}/{n}：{file}  {got} / {total} MB（{host}）', dl_done: '✓ 下载完成，已刷新模型列表',
+      dl_error: '下载出错：', dl_cancelled: '已取消。再点一次下载会从断点接着下。',
       engine_label: '本地渲染引擎',
       engine_zimage: 'Z-Image Turbo + SeedVR2（照片级，推荐）',
       engine_sdxl: 'RealVisXL（旧版）',
@@ -70,6 +73,9 @@
     en: {
       app_title: 'AI Render Studio', lang_label: 'Language',
       score_label: 'Structure match {s}%', score_hint: 'Share of SketchUp model edges still in place in the photo (chance-corrected). Higher = closer to the model.',
+      dl_required: '⬇ Download the {n} missing files (~{gb} GB)', dl_seedvr: '⬇ Download SeedVR2 (~{gb} GB)',
+      dl_progress: 'Downloading {i}/{n}: {file}  {got} / {total} MB ({host})', dl_done: '✓ Download complete, model list refreshed',
+      dl_error: 'Download error: ', dl_cancelled: 'Cancelled. Clicking download again resumes where it stopped.',
       engine_label: 'Local render engine',
       engine_zimage: 'Z-Image Turbo + SeedVR2 (photoreal, recommended)',
       engine_sdxl: 'RealVisXL (legacy)',

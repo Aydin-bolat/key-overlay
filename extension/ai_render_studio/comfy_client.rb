@@ -65,6 +65,14 @@ module AydinCreative
         []
       end
 
+      # 每类模型文件夹在磁盘上的真实路径（ComfyUI 自己的配置，含 extra_model_paths）→ { 'vae' => [..], ... }
+      def folder_paths
+        res = get('/internal/folder_paths', timeout: 10)
+        res.is_a?(Net::HTTPSuccess) ? JSON.parse(res.body) : {}
+      rescue StandardError
+        {}
+      end
+
       # 把本地图片放进 ComfyUI 输入目录，返回它在 LoadImage 里用的文件名
       def stage_input(local_path)
         raise "输入图不存在: #{local_path}" unless File.exist?(local_path)
