@@ -508,8 +508,9 @@ module AydinCreative
       rlog "  src #{File.size(src)} bytes #{cap[:w]}x#{cap[:h]} (bright, no shadows)"
       @last_source_path = src
       lines_path = File.join(WORK_DIR, "lines_#{stamp}.png")
-      lin = Capture.lines(v, lines_path, aspect: @aspect)
+      lin = Capture.lines(v, lines_path, aspect: @aspect, clean: true)
       raise '边线图生成失败——Z-Image 管线靠它锁结构，详见 render.log' unless lin
+      rlog "  lines clean=#{lin[:clean]}"
 
       input_name, lines_name = step(tr(:s_upload), 0.10) { [client.stage_input(src), client.stage_input(lines_path)] }
       vlm = client.node?('TextGenerate') && client.models('text_encoders').include?(WorkflowBuilder::VISION_CLIP) ? WorkflowBuilder::VISION_CLIP : nil
@@ -533,7 +534,7 @@ module AydinCreative
         build: lambda do |seed, tag|
           PhotoBuilder.build_structure(input_filename: input_name, lines_filename: lines_name, models: res[:models],
                                        prompt: prompt, strength: strength, seed: seed, tag: tag, vlm_model: vlm, kind: kind,
-                                       reference_filename: ref_name)
+                                       reference_filename: ref_name, lines_clean: lin[:clean])
         end
       }
       start_zimage_attempt

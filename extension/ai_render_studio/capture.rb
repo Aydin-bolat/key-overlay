@@ -64,11 +64,19 @@ module AydinCreative
         ar = aspect_value(view, opts[:aspect] || 'window')
         w, h = dims_for(ar, SOURCE_LONG_EDGE)
 
+        # clean: 真正的线稿——"消隐线"模式(RenderMode 1)：所有面画成白色、只剩黑色细线，
+        # 跟材质颜色无关（黑衣柜不会变成一大块"边"）。给 Z-Image 的 ControlNet 用：
+        # 反相后直接就是单像素白线，不用再过 Canny（Canny 会把每条黑线拆成两条平行边，
+        # 9-28 实测成品每个棱边都出现黑色描边，像线稿上色的插画）。
+        # RenderMode 设不上（老版本曾报错）就退回原来的"色块+黑线"，返回值里 clean: false。
+        clean = opts[:clean] ? true : false
         keys = %w[Texture DisplayEdges DisplayProfiles DisplaySketchEdges DrawDepthQue
                   DisplayColorByLayer EdgeColorMode DisplayInstanceAxes DrawSilhouettes]
+        keys += %w[RenderMode ForegroundColor BackgroundColor DrawHorizon DrawGround DisplayWatermarks] if clean
         saved = {}
         keys.each { |k| saved[k] = (ro[k] rescue nil) }
         saved_shadows = si['DisplayShadows']
+        clean_ok = false
 
         begin
           set_ro(ro, 'Texture', false)
@@ -81,6 +89,18 @@ module AydinCreative
           set_ro(ro, 'DrawDepthQue', false)
           set_ro(ro, 'EdgeColorMode', 0)       # 全黑边
           si['DisplayShadows'] = false
+          if clean
+            set_ro(ro, 'DisplayProfiles', false) # 轮廓粗线关掉，所有线一样细
+            set_ro(ro, 'DrawSilhouettes', false)
+            set_ro(ro, 'ForegroundColor', Sketchup::Color.new(0, 0, 0))
+            set_ro(ro, 'BackgroundColor', Sketchup::Color.new(255, 255, 255))
+            set_ro(ro, 'DrawHorizon', false)
+            set_ro(ro, 'DrawGround', false)
+            set_ro(ro, 'DisplayWatermarks', false)
+            set_ro(ro, 'RenderMode', 1)
+            clean_ok = (ro['RenderMode'].to_i == 1 rescue false)
+            clog "lines: clean hidden-line mode #{clean_ok ? 'on' : 'NOT available, fallback to shaded+edges'}"
+          end
 
           ok = timed(50, "lines #{w}x#{h}") { view.write_image(filename: path, width: w, height: h, antialias: true) }
           ok = timed(40, 'lines(wh)') { view.write_image(filename: path, width: w, height: h) } if !ok || bad?(path)
@@ -92,7 +112,7 @@ module AydinCreative
 
         return nil if bad?(path)
         clog "lines: ok #{File.size(path)} bytes"
-        { path: path, w: w, h: h }
+        { path: path, w: w, h: h, clean: clean_ok }
       end
 
       def timed(sec, label)
@@ -161,8 +181,9 @@ module AydinCreative
           if bright
             si['DisplayShadows'] = false
             set_ro(si, 'UseSunForAllShading', false)
-            set_ro(si, 'Light', 85)
-            set_ro(si, 'Dark', 60)
+            # 接近 SketchUp 默认(80/45)，只是略提暗面——9-28 实测 85/60 太平，成品像平涂插画
+            set_ro(si, 'Light', 80)
+            set_ro(si, 'Dark', 50)
           end
 
           ok = timed(60, "textured #{w}x#{h}") do

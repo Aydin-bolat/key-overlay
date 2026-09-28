@@ -192,18 +192,22 @@ module AydinCreative
 
       # ---- 第一阶段：Z-Image Turbo + ControlNet(SketchUp 真实边线) + img2img ---------------
       # ai_strength 0-100 → denoise / ControlNet 强度：
-      #   0   : denoise 0.90, cn 1.00 —— 边线锁死，截图只提供大致的颜色分区
-      #   100 : denoise 1.00, cn 0.60 —— 只保留大结构
+      #   0   : denoise 0.92, cn 0.75 —— 结构锁住，截图只提供大致的颜色分区
+      #   100 : denoise 1.00, cn 0.50 —— 只保留大结构
+      # 9-28 第二轮实测：cn 1.0 时成品每条棱边都被画成黑色描边、明暗平涂，像线稿上色的插画。
+      # Z-Image Fun ControlNet 推荐的控制强度是 0.65-0.80，1.0 会把边线当成"要画出来的线"。
       # 9-28 实测：denoise 0.86 时成品整体灰暗发闷——img2img 把 SketchUp 截图的暗灰明暗关系
       # 原样继承了，AI 没有空间重新打光。结构靠 ControlNet(真实边线)锁，不靠低 denoise，
       # 所以把下限提到 0.90，同时截图改成"调亮、无阴影"(Capture.textured bright:)。
       DIFFUSION_MEGAPIXELS = 1.5 # ControlNet Union 训练分辨率 1328²≈1.76MP，1.5MP 附近最稳
 
+      # lines_clean: 线稿是 SketchUp 消隐线模式出的"白底黑细线"(Capture.lines clean:) →
+      # 直接反相成"黑底白线"喂 ControlNet；否则(色块+黑线的旧线稿)才用 Canny 提边。
       def build_structure(input_filename:, lines_filename:, models:, prompt:, strength:, seed:, tag:,
-                          vlm_model: nil, kind: 'exterior', reference_filename: nil)
+                          vlm_model: nil, kind: 'exterior', reference_filename: nil, lines_clean: false)
         t = strength.to_i.clamp(0, 100) / 100.0
-        denoise = (0.90 + 0.10 * t).round(3)
-        cn = (1.0 - 0.4 * t).round(3)
+        denoise = (0.92 + 0.08 * t).round(3)
+        cn = (0.75 - 0.25 * t).round(3)
         stamp = Time.now.strftime('%Y%m%d_%H%M%S')
 
         g = loader_nodes(models).merge(
@@ -222,7 +226,9 @@ module AydinCreative
           'lines_s' => { 'class_type' => 'ImageScale', 'inputs' => {
             'image' => ['lines', 0], 'upscale_method' => 'lanczos', 'width' => ['sz', 0], 'height' => ['sz', 1], 'crop' => 'disabled'
           } },
-          'edge' => { 'class_type' => 'Canny', 'inputs' => { 'image' => ['lines_s', 0], 'low_threshold' => 0.1, 'high_threshold' => 0.32 } },
+          'edge' => (lines_clean ?
+            { 'class_type' => 'ImageInvert', 'inputs' => { 'image' => ['lines_s', 0] } } :
+            { 'class_type' => 'Canny', 'inputs' => { 'image' => ['lines_s', 0], 'low_threshold' => 0.1, 'high_threshold' => 0.32 } }),
           'cn' => { 'class_type' => 'QwenImageDiffsynthControlnet', 'inputs' => {
             'model' => model_ref(models), 'model_patch' => ['patch', 0], 'vae' => vae_ref(models), 'image' => ['edge', 0], 'strength' => cn
           } },
@@ -423,7 +429,9 @@ module AydinCreative
           'The building is crisply lit with clean highlights and rich shadows, realistic global illumination, soft contact shadows, reflections in the glazing, atmospheric depth.')
         parts << 'Photorealistic, every surface shows real physical material texture: visible wood grain, fabric weave and ' \
                  'soft folds, stone veining, brushed metal, glass with reflections. Natural colour, high dynamic range, ' \
-                 'strong but natural contrast, crisp detail, no haze, no grey veil.' + (interior ? '' : ' Real grass, real paving, real trees and real sky.')
+                 'strong but natural contrast, crisp detail, no haze, no grey veil. Edges between surfaces are defined ' \
+                 'only by real light, shadow and material change, like in a camera photograph - never by drawn outlines.' +
+                 (interior ? '' : ' Real grass, real paving, real trees and real sky.')
         parts.join(' ')
       end
 
