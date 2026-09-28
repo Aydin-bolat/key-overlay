@@ -23,13 +23,33 @@ module AydinCreative
         { key: 'landscape_led', label: '景观灯光',   text: 'Night scene with designed landscape lighting — uplit trees, low bollard path lights, step and cove lighting — layered warm pools of light, dark surroundings, a soft warm glow from the interior.' }
       ].freeze
 
+      # 室内版：同一个按钮在室内场景下用这套描述。上面那套是按建筑外观写的（天空/地面/立面），
+      # 室内直接用会把画面带偏——实测室内选"雨天"得到 "flat grey light, no shadows"，整张图灰暗发闷。
+      # 室内照片好看的关键：窗光的方向和层次 + 灯具真的在发光、光斑落在墙和地面上。
+      INTERIOR = {
+        'midday' => 'Bright clear midday: strong daylight pours through the windows, sunlit patches on the floor, the room bright and airy with crisp soft-edged shadows and clean white balance.',
+        'overcast' => 'Soft overcast daylight from the windows fills the room evenly, gentle wrap-around light, very soft shadows, calm neutral tones, bright but not harsh.',
+        'golden' => 'Late-afternoon golden hour: warm low sunlight streams through the window and rakes across the walls and floor in long golden beams, lamps glowing warmly, rich warm atmosphere.',
+        'blue_hour' => 'Dusk blue hour: deep blue twilight outside the windows, every lamp switched on, warm 2700K light pooling on the walls, bed and floor, cosy high-contrast mood.',
+        'morning_mist' => 'Early morning: soft cool light through sheer curtains, a bright fresh airy room, delicate soft shadows, a few warm lamps still on.',
+        'rain' => 'Rainy day: soft grey daylight through rain-streaked windows, the room kept bright and cosy by warm lamps glowing on the walls and bedside, gentle contrast between cool daylight and warm lamplight.',
+        'snow' => 'Snowy day: bright cool light reflected from snow outside the windows, clean crisp interior, warm lamps adding a cosy glow.',
+        'dramatic_sky' => 'Dramatic sunlight: a strong shaft of sunlight enters through the window creating bold light and shadow patterns across the room, high dynamic range, cinematic.',
+        'warm_interior' => 'Night: dark window, all lamps on — pendant, wall lights and bedside lamps glowing warm 2700K, light pooling on surfaces with soft gradients, cosy luxurious hotel mood.',
+        'facade_flood' => 'Night: architectural lighting — cove lights and wall washers grazing the walls, highlighting mouldings and textures, warm accent lamps, elegant contrast.',
+        'city_night' => 'Night: city lights glowing through the window, warm lamps inside, reflections in the glass, sophisticated evening mood.',
+        'moonlight' => 'Night: cool moonlight through the window mixed with a few warm lamps, calm and intimate, soft contrast.',
+        'landscape_led' => 'Night: layered lighting — hidden LED strips, wall lights and bedside lamps, warm pools of light and soft gradients on the walls.'
+      }.freeze
+
       module_function
 
       def all
         { day: DAY, night: NIGHT }
       end
 
-      def text_for(mode, key)
+      def text_for(mode, key, kind = nil)
+        return INTERIOR[key] if kind.to_s == 'interior' && INTERIOR.key?(key)
         list = mode.to_s == 'night' ? NIGHT : DAY
         entry = list.find { |e| e[:key] == key }
         entry && entry[:text]

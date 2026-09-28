@@ -143,6 +143,10 @@ module AydinCreative
         saved = {}
         keys.each { |k| saved[k] = ro[k] rescue nil }
         saved_shadows = si['DisplayShadows']
+        # bright: 给 Z-Image 管线用——img2img 会继承截图的明暗，SketchUp 默认的暗面+阴影会让成品
+        # 整体灰暗(实测)。截图时临时把面的明暗调亮、关掉 SketchUp 阴影，光照交给 AI 重新打。
+        bright = opts[:bright] ? true : false
+        saved_si = %w[Light Dark UseSunForAllShading].map { |k| [k, (si[k] rescue nil)] }.to_h if bright
 
         begin
           set_ro(ro, 'DisplayEdges', false)
@@ -154,6 +158,12 @@ module AydinCreative
           set_ro(ro, 'Texture', true)
           set_ro(ro, 'EdgeDisplayMode', 0)
           si['DisplayShadows'] = want_shadows
+          if bright
+            si['DisplayShadows'] = false
+            set_ro(si, 'UseSunForAllShading', false)
+            set_ro(si, 'Light', 85)
+            set_ro(si, 'Dark', 60)
+          end
 
           ok = timed(60, "textured #{w}x#{h}") do
             view.write_image(filename: path, width: w, height: h, antialias: false)
@@ -163,6 +173,7 @@ module AydinCreative
         ensure
           saved.each { |k, val| set_ro(ro, k, val) unless val.nil? }
           si['DisplayShadows'] = saved_shadows unless saved_shadows.nil?
+          saved_si&.each { |k, val| set_ro(si, k, val) unless val.nil? }
           view.invalidate
         end
 

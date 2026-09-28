@@ -192,14 +192,17 @@ module AydinCreative
 
       # ---- 第一阶段：Z-Image Turbo + ControlNet(SketchUp 真实边线) + img2img ---------------
       # ai_strength 0-100 → denoise / ControlNet 强度：
-      #   0   : denoise 0.86, cn 1.00 —— 保留截图的颜色分区，边线锁死
+      #   0   : denoise 0.90, cn 1.00 —— 边线锁死，截图只提供大致的颜色分区
       #   100 : denoise 1.00, cn 0.60 —— 只保留大结构
+      # 9-28 实测：denoise 0.86 时成品整体灰暗发闷——img2img 把 SketchUp 截图的暗灰明暗关系
+      # 原样继承了，AI 没有空间重新打光。结构靠 ControlNet(真实边线)锁，不靠低 denoise，
+      # 所以把下限提到 0.90，同时截图改成"调亮、无阴影"(Capture.textured bright:)。
       DIFFUSION_MEGAPIXELS = 1.5 # ControlNet Union 训练分辨率 1328²≈1.76MP，1.5MP 附近最稳
 
       def build_structure(input_filename:, lines_filename:, models:, prompt:, strength:, seed:, tag:,
                           vlm_model: nil, kind: 'exterior', reference_filename: nil)
         t = strength.to_i.clamp(0, 100) / 100.0
-        denoise = (0.86 + 0.14 * t).round(3)
+        denoise = (0.90 + 0.10 * t).round(3)
         cn = (1.0 - 0.4 * t).round(3)
         stamp = Time.now.strftime('%Y%m%d_%H%M%S')
 
@@ -309,48 +312,73 @@ module AydinCreative
         models[:loader] == :ckpt ? ['ckpt', 2] : ['vae', 0]
       end
 
-      # ---- 第二阶段：SeedVR2 精修放大到目标分辨率 ------------------------------------
-      # 先 lanczos 放到目标尺寸，SeedVR2 一步扩散补真实细节；PostProcessing 用 LAB 把颜色
-      # 对齐回第一阶段的图（官方描述："most faithful"），几何也按参考图对齐。
-      def build_seedvr(input_filename:, seedvr:, width:, height:, seed:)
-        stamp = Time.now.strftime('%Y%m%d_%H%M%S')
-        tiled = { 'tile_size' => 512, 'overlap' => 128, 'temporal_size' => 4096, 'temporal_overlap' => 8 }
-        {
-          'img' => { 'class_type' => 'LoadImage', 'inputs' => { 'image' => input_filename } },
-          'rs' => { 'class_type' => 'ImageScale', 'inputs' => {
-            'image' => ['img', 0], 'upscale_method' => 'lanczos', 'width' => width, 'height' => height, 'crop' => 'disabled'
-          } },
-          'pre' => { 'class_type' => 'SeedVR2Preprocess', 'inputs' => { 'resized_images' => ['rs', 0] } },
-          'vae' => { 'class_type' => 'VAELoader', 'inputs' => { 'vae_name' => seedvr[:vae] } },
-          'unet' => { 'class_type' => 'UNETLoader', 'inputs' => { 'unet_name' => seedvr[:unet], 'weight_dtype' => 'default' } },
-          'enc' => { 'class_type' => 'VAEEncodeTiled', 'inputs' => { 'pixels' => ['pre', 0], 'vae' => ['vae', 0] }.merge(tiled) },
-          'cond' => { 'class_type' => 'SeedVR2Conditioning', 'inputs' => { 'model' => ['unet', 0], 'vae_conditioning' => ['enc', 0] } },
-          'ks' => { 'class_type' => 'KSampler', 'inputs' => {
-            'model' => ['unet', 0], 'seed' => seed, 'steps' => 1, 'cfg' => 1.0, 'sampler_name' => 'euler', 'scheduler' => 'simple',
-            'positive' => ['cond', 0], 'negative' => ['cond', 1], 'latent_image' => ['enc', 0], 'denoise' => 1.0
-          } },
-          'dec' => { 'class_type' => 'VAEDecodeTiled', 'inputs' => { 'samples' => ['ks', 0], 'vae' => ['vae', 0] }.merge(tiled) },
-          'post' => { 'class_type' => 'SeedVR2PostProcessing', 'inputs' => {
-            'images' => ['dec', 0], 'original_resized_images' => ['rs', 0], 'color_correction_method' => 'lab'
-          } },
-          'save' => { 'class_type' => 'SaveImage', 'inputs' => { 'images' => ['post', 0], 'filename_prefix' => "SU_AI_Render/#{stamp}_final" } }
-        }
+      # ---- 第二阶段：高分辨率细化 → SeedVR2 精修放大 -----------------------------------
+      # 9-28 实测：1.5MP 出图直接交给 SeedVR2，纹理细节不够"照片"。中间加一遍 Z-Image 高分辨率
+      # 低降噪细化——参数照 ComfyUI 官方 "Z-Image-Turbo 2K Upscaler" 模板：先放大，再 5 步
+      # dpmpp_2m_sde/beta、cfg 1、denoise 0.33（模板注明 0.25-0.35 是安全区，>0.35 会出瑕疵），
+      # 配详细描述。这一遍在高分辨率上重画微观细节(木纹、织物、反光)，但低 denoise 不动结构。
+      # 然后 SeedVR2 放到目标分辨率：一步扩散补真实纹理，LAB 颜色对齐回细化后的图。
+      REFINE_DENOISE = 0.33
+      REFINE_MIN_LONG = 1920
+      REFINE_MAX_LONG = 2560 # 16GB 显存上 Z-Image 细化的舒适上限；再大交给 SeedVR2
+
+      def refine_dims(width, height)
+        long = [width, height].max
+        target = long.clamp(REFINE_MIN_LONG, REFINE_MAX_LONG).to_f
+        k = target / long
+        [((width * k) / 16).round * 16, ((height * k) / 16).round * 16]
       end
 
-      # 没装 SeedVR2 时的兜底：ESRGAN(有的话) + lanczos 到目标尺寸，不再过一遍会改画面的扩散
-      def build_resize(input_filename:, width:, height:, esrgan: nil)
+      def build_finish(input_filename:, models:, prompt:, width:, height:, seed:, seedvr: nil, esrgan: nil, refine: true)
         stamp = Time.now.strftime('%Y%m%d_%H%M%S')
         g = { 'img' => { 'class_type' => 'LoadImage', 'inputs' => { 'image' => input_filename } } }
         src = ['img', 0]
-        if esrgan
-          g['um'] = { 'class_type' => 'UpscaleModelLoader', 'inputs' => { 'model_name' => esrgan } }
-          g['up'] = { 'class_type' => 'ImageUpscaleWithModel', 'inputs' => { 'upscale_model' => ['um', 0], 'image' => src } }
-          src = ['up', 0]
+
+        if refine
+          rw, rh = refine_dims(width, height)
+          if esrgan
+            g['um'] = { 'class_type' => 'UpscaleModelLoader', 'inputs' => { 'model_name' => esrgan } }
+            g['up'] = { 'class_type' => 'ImageUpscaleWithModel', 'inputs' => { 'upscale_model' => ['um', 0], 'image' => src } }
+            src = ['up', 0]
+          end
+          g['r_in'] = { 'class_type' => 'ImageScale', 'inputs' => {
+            'image' => src, 'upscale_method' => 'lanczos', 'width' => rw, 'height' => rh, 'crop' => 'disabled'
+          } }
+          g.merge!(loader_nodes(models))
+          g['r_ms'] = { 'class_type' => 'ModelSamplingAuraFlow', 'inputs' => { 'model' => model_ref(models), 'shift' => 3 } }
+          g['r_pos'] = { 'class_type' => 'CLIPTextEncode', 'inputs' => { 'clip' => clip_ref(models), 'text' => prompt } }
+          g['r_neg'] = { 'class_type' => 'ConditioningZeroOut', 'inputs' => { 'conditioning' => ['r_pos', 0] } }
+          g['r_lat'] = { 'class_type' => 'VAEEncode', 'inputs' => { 'pixels' => ['r_in', 0], 'vae' => vae_ref(models) } }
+          g['r_ks'] = { 'class_type' => 'KSampler', 'inputs' => {
+            'model' => ['r_ms', 0], 'seed' => seed, 'steps' => 5, 'cfg' => 1.0, 'sampler_name' => 'dpmpp_2m_sde', 'scheduler' => 'beta',
+            'positive' => ['r_pos', 0], 'negative' => ['r_neg', 0], 'latent_image' => ['r_lat', 0], 'denoise' => REFINE_DENOISE
+          } }
+          g['r_dec'] = { 'class_type' => 'VAEDecode', 'inputs' => { 'samples' => ['r_ks', 0], 'vae' => vae_ref(models) } }
+          src = ['r_dec', 0]
         end
+
         g['rs'] = { 'class_type' => 'ImageScale', 'inputs' => {
           'image' => src, 'upscale_method' => 'lanczos', 'width' => width, 'height' => height, 'crop' => 'disabled'
         } }
-        g['save'] = { 'class_type' => 'SaveImage', 'inputs' => { 'images' => ['rs', 0], 'filename_prefix' => "SU_AI_Render/#{stamp}_final" } }
+        out = ['rs', 0]
+        if seedvr
+          tiled = { 'tile_size' => 512, 'overlap' => 128, 'temporal_size' => 4096, 'temporal_overlap' => 8 }
+          g['sv_pre'] = { 'class_type' => 'SeedVR2Preprocess', 'inputs' => { 'resized_images' => ['rs', 0] } }
+          g['sv_vae'] = { 'class_type' => 'VAELoader', 'inputs' => { 'vae_name' => seedvr[:vae] } }
+          g['sv_unet'] = { 'class_type' => 'UNETLoader', 'inputs' => { 'unet_name' => seedvr[:unet], 'weight_dtype' => 'default' } }
+          g['sv_enc'] = { 'class_type' => 'VAEEncodeTiled', 'inputs' => { 'pixels' => ['sv_pre', 0], 'vae' => ['sv_vae', 0] }.merge(tiled) }
+          g['sv_cond'] = { 'class_type' => 'SeedVR2Conditioning', 'inputs' => { 'model' => ['sv_unet', 0], 'vae_conditioning' => ['sv_enc', 0] } }
+          g['sv_ks'] = { 'class_type' => 'KSampler', 'inputs' => {
+            'model' => ['sv_unet', 0], 'seed' => seed, 'steps' => 1, 'cfg' => 1.0, 'sampler_name' => 'euler', 'scheduler' => 'simple',
+            'positive' => ['sv_cond', 0], 'negative' => ['sv_cond', 1], 'latent_image' => ['sv_enc', 0], 'denoise' => 1.0
+          } }
+          g['sv_dec'] = { 'class_type' => 'VAEDecodeTiled', 'inputs' => { 'samples' => ['sv_ks', 0], 'vae' => ['sv_vae', 0] }.merge(tiled) }
+          g['sv_post'] = { 'class_type' => 'SeedVR2PostProcessing', 'inputs' => {
+            'images' => ['sv_dec', 0], 'original_resized_images' => ['rs', 0], 'color_correction_method' => 'lab'
+          } }
+          out = ['sv_post', 0]
+        end
+        g['save'] = { 'class_type' => 'SaveImage', 'inputs' => { 'images' => out, 'filename_prefix' => "SU_AI_Render/#{stamp}_final" } }
         g
       end
 
@@ -370,8 +398,8 @@ module AydinCreative
         interior = kind.to_s == 'interior'
         parts = []
         parts << (interior ?
-          'A real professional interior photograph of this room, shot on a full-frame DSLR with a 24mm wide lens at eye level, straight vertical lines, as published in an architecture and interior design magazine.' :
-          'A real professional architectural photograph of this building, shot on a full-frame DSLR with a 24mm wide lens, straight vertical lines, as published in an architecture magazine.')
+          'A real professional interior photograph of this room for Architectural Digest, shot on a Canon EOS R5 with a 24mm tilt-shift lens at f/8, eye level, straight vertical lines, perfectly exposed.' :
+          'A real professional architectural photograph of this building for an architecture magazine, shot on a Canon EOS R5 with a 24mm tilt-shift lens at f/8, straight vertical lines, perfectly exposed.')
 
         mats = material_sentences(ctx)
         parts << "Surfaces and materials: #{mats}." unless mats.empty?
@@ -389,10 +417,13 @@ module AydinCreative
         up = user_prompt.to_s.strip.tr("\n", ' ')
         parts << (up =~ /[.。!！]\z/ ? up : "#{up}.") unless up.empty?
 
-        parts << 'Photorealistic, every surface has real physical material texture: visible wood grain, fabric weave, ' \
-                 'stone veining, brushed metal, clear glass with reflections. Soft realistic shadows, ambient occlusion ' \
-                 'in corners and under furniture, bounce light, natural colour, high dynamic range, crisp detail, ' \
-                 'subtle film grain.' + (interior ? '' : ' Real grass, real paving, real trees and real sky.')
+        # 9-28 实测成品灰暗发闷：光的描述要具体到"光从哪来、落在哪、多亮"，并明确要干净通透的曝光
+        parts << (interior ?
+          'The room is bright and well lit with clean whites and rich deep shadows: daylight enters from the windows and falls across the floor and walls, every light fixture is switched on and glowing, casting warm pools of light and soft gradients onto the walls, ceiling and furniture. Realistic global illumination and bounce light, soft contact shadows under furniture, ambient occlusion in corners, subtle reflections on the floor.' :
+          'The building is crisply lit with clean highlights and rich shadows, realistic global illumination, soft contact shadows, reflections in the glazing, atmospheric depth.')
+        parts << 'Photorealistic, every surface shows real physical material texture: visible wood grain, fabric weave and ' \
+                 'soft folds, stone veining, brushed metal, glass with reflections. Natural colour, high dynamic range, ' \
+                 'strong but natural contrast, crisp detail, no haze, no grey veil.' + (interior ? '' : ' Real grass, real paving, real trees and real sky.')
         parts.join(' ')
       end
 

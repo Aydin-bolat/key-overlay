@@ -43,7 +43,7 @@ module AydinCreative
     # ---- Ruby 侧界面文字（菜单 / 弹窗 / 保存对话框 / 错误）------------
     STRINGS = {
       'zh' => {
-        s_probe: '检查本地模型…', s_attempt: 'Z-Image 照片级出图（第 %d/%d 张）…', s_retry: '结构吻合度 %d%%，换种子重出…', s_upscale: 'SeedVR2 精修放大到目标分辨率…', s_resize: '放大到目标分辨率（未安装 SeedVR2）…',
+        s_probe: '检查本地模型…', s_attempt: 'Z-Image 照片级出图（第 %d/%d 张）…', s_retry: '结构吻合度 %d%%，换种子重出…', s_upscale: '高分辨率细化 + SeedVR2 精修放大…', s_resize: '高分辨率细化 + 放大（未安装 SeedVR2）…',
         s_extract: '提取模型信息…（大模型可能要几秒）', s_capture: '截取当前视角…', s_connect: '连接 ComfyUI…', s_upload: '上传结构图…', s_upref: '上传参考图…', s_build: '生成工作流…', s_submit: '提交到 ComfyUI…', s_detail: '细节锁：补回线脚/绗缝等细节…', s_processing: 'ComfyUI 处理中',
         menu_open: '打开渲染面板', menu_reload: '重新加载插件（开发）', menu_log: '打开日志文件夹',
         cmd_name: 'AI 渲染', cmd_tip: 'AI 渲染工作室',
@@ -55,7 +55,7 @@ module AydinCreative
         err_seealso: '（%s）— 详见 render.log', save_fail: '保存失败：'
       },
       'en' => {
-        s_probe: 'Checking local models…', s_attempt: 'Z-Image photoreal pass (%d/%d)…', s_retry: 'Structure match %d%%, re-rendering with a new seed…', s_upscale: 'SeedVR2 detail upscale…', s_resize: 'Resizing to target (SeedVR2 not installed)…',
+        s_probe: 'Checking local models…', s_attempt: 'Z-Image photoreal pass (%d/%d)…', s_retry: 'Structure match %d%%, re-rendering with a new seed…', s_upscale: 'High-res refine + SeedVR2 detail upscale…', s_resize: 'High-res refine + resize (SeedVR2 not installed)…',
         s_extract: 'Reading model info… (a few seconds on big models)', s_capture: 'Capturing the view…', s_connect: 'Connecting to ComfyUI…', s_upload: 'Uploading structure image…', s_upref: 'Uploading reference image…', s_build: 'Building workflow…', s_submit: 'Submitting to ComfyUI…', s_detail: 'Detail lock: restoring mouldings and seams…', s_processing: 'ComfyUI is working',
         menu_open: 'Open render panel', menu_reload: 'Reload plugin (dev)', menu_log: 'Open log folder',
         cmd_name: 'AI Render', cmd_tip: 'AI Render Studio',
@@ -427,7 +427,7 @@ module AydinCreative
         lin = (Capture.lines(v, lines_path, aspect: @aspect) rescue nil)
         rlog "  lines #{lin ? "#{File.size(lines_path)}b" : 'skipped'}"
 
-        preset_text = opts[:preset_key].to_s.empty? ? nil : Presets.text_for(opts[:mode], opts[:preset_key])
+        preset_text = opts[:preset_key].to_s.empty? ? nil : Presets.text_for(opts[:mode], opts[:preset_key], opts[:kind])
 
         client = ComfyClient.new
         step(tr(:s_connect), 0.10) do
@@ -503,8 +503,9 @@ module AydinCreative
       ctx = step(tr(:s_extract), 0.06) { ModelExtractor.extract(v) }
       stamp = Time.now.strftime('%Y%m%d_%H%M%S')
       src = File.join(WORK_DIR, "source_#{stamp}.png")
-      cap = step(tr(:s_capture), 0.08) { Capture.textured(v, src, shadows: opts[:shadows], aspect: @aspect) }
-      rlog "  src #{File.size(src)} bytes #{cap[:w]}x#{cap[:h]}"
+      # 调亮、关阴影截图：光照交给 AI 重新打（SketchUp 的暗面+阴影会让成品整体灰暗）
+      cap = step(tr(:s_capture), 0.08) { Capture.textured(v, src, shadows: false, bright: true, aspect: @aspect) }
+      rlog "  src #{File.size(src)} bytes #{cap[:w]}x#{cap[:h]} (bright, no shadows)"
       @last_source_path = src
       lines_path = File.join(WORK_DIR, "lines_#{stamp}.png")
       lin = Capture.lines(v, lines_path, aspect: @aspect)
@@ -518,7 +519,7 @@ module AydinCreative
         File.binwrite(ref_path, opts[:ref_data_uri].sub(%r{\Adata:image/[^;]+;base64,}, '').unpack1('m'))
         ref_name = client.stage_input(ref_path)
       end
-      preset_text = opts[:preset_key].to_s.empty? ? nil : Presets.text_for(opts[:mode], opts[:preset_key])
+      preset_text = opts[:preset_key].to_s.empty? ? nil : Presets.text_for(opts[:mode], opts[:preset_key], opts[:kind])
       kind = opts[:kind] || 'exterior'
       prompt = PhotoBuilder.prompt(kind: kind, ctx: ctx, preset: preset_text, user_prompt: opts[:user_prompt])
       File.write(File.join(WORK_DIR, 'last_prompt.txt'), prompt) rescue nil
@@ -528,6 +529,7 @@ module AydinCreative
       @job = {
         stage: :attempt, attempts: 0, max: settings[:auto_retry] ? MAX_ATTEMPTS : 1, best: nil,
         lines_path: lines_path, user_seed: opts[:seed], seedvr: res[:seedvr], w: w, h: h,
+        models: res[:models], prompt: prompt,
         build: lambda do |seed, tag|
           PhotoBuilder.build_structure(input_filename: input_name, lines_filename: lines_name, models: res[:models],
                                        prompt: prompt, strength: strength, seed: seed, tag: tag, vlm_model: vlm, kind: kind,
@@ -580,19 +582,14 @@ module AydinCreative
       job[:stage] = :finish
       client = ComfyClient.new
       name = client.stage_input(job[:best][:local])
-      if job[:seedvr]
-        graph = PhotoBuilder.build_seedvr(input_filename: name, seedvr: job[:seedvr], width: job[:w], height: job[:h],
-                                          seed: rand(1..2_147_483_646))
-        note = tr(:s_upscale)
-      else
-        esr = client.models('upscale_models').find { |f| f =~ /esrgan|4x/i }
-        graph = PhotoBuilder.build_resize(input_filename: name, width: job[:w], height: job[:h],
-                                          esrgan: [job[:w], job[:h]].max > 1600 ? esr : nil)
-        note = tr(:s_resize)
-      end
+      esr = client.models('upscale_models').find { |f| f =~ /esrgan|4x/i }
+      graph = PhotoBuilder.build_finish(input_filename: name, models: job[:models], prompt: job[:prompt],
+                                        width: job[:w], height: job[:h], seed: rand(1..2_147_483_646),
+                                        seedvr: job[:seedvr], esrgan: esr)
+      note = tr(job[:seedvr] ? :s_upscale : :s_resize)
       File.write(File.join(WORK_DIR, 'last_finish_graph.json'), JSON.pretty_generate(graph)) rescue nil
       pid = client.queue(graph)
-      rlog "  finish queued #{pid} (#{job[:seedvr] ? 'seedvr2' : 'resize'}) #{job[:w]}x#{job[:h]}"
+      rlog "  finish queued #{pid} (refine + #{job[:seedvr] ? 'seedvr2' : 'resize'}) #{job[:w]}x#{job[:h]} esrgan=#{esr || 'none'}"
       run_job(phase: 'render', note: note) do |state|
         wait_and_fetch(pid) { |q| state[:pct] = 0.84 + q.to_f * 0.14 }
       end
