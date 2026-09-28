@@ -114,8 +114,8 @@
     refreshEngineUi();
   }
   function refreshEngineUi() {
-    $('#geom-note').textContent = T('geom_note_zimage');
-    $('#render-note').textContent = T('render_note_zimage');
+    $('#geom-note').textContent = T('geom_note_flux');
+    $('#render-note').textContent = T('render_note_flux');
     renderModelStatus();
   }
   function esc(t) { return String(t).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
@@ -124,11 +124,8 @@
     if (!m) { box.innerHTML = ''; return; }
     var html = m.ok ? '<span class="ok">' + esc(T('models_ok')) + '</span>'
       : '<span class="err">' + esc(T('models_missing')) + '</span>\n' + esc((m.missing || []).join('\n'));
-    html += '\n' + (m.seedvr ? '<span class="ok">' + esc(T('seedvr_ok')) + '</span>'
-      : '<span class="warn">' + esc(T('seedvr_missing')) + '</span>\n' + esc(m.seedvr_hint || ''));
     var btns = '';
     if (m.dl_required && m.dl_required.count) btns += '<button class="small" data-dl="required">' + esc(T('dl_required', { n: m.dl_required.count, gb: m.dl_required.gb })) + '</button>';
-    if (m.dl_seedvr && m.dl_seedvr.count) btns += '<button class="small ghost" data-dl="seedvr">' + esc(T('dl_seedvr', { gb: m.dl_seedvr.gb })) + '</button>';
     if (btns) html += '\n<span class="dl-btns">' + btns + '</span>';
     html += '<div id="dl-progress"></div>';
     box.innerHTML = html;

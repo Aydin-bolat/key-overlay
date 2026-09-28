@@ -7,7 +7,7 @@ require File.join(__dir__, 'presets')
 require File.join(__dir__, 'model_extractor')
 require File.join(__dir__, 'capture')
 require File.join(__dir__, 'comfy_client')
-require File.join(__dir__, 'photo_builder')
+require File.join(__dir__, 'flux_builder')
 require File.join(__dir__, 'geometry_check')
 require File.join(__dir__, 'downloader')
 
@@ -35,13 +35,13 @@ module AydinCreative
     @aspect_ratio = 0.0
     @last_opts = {}          # 上次渲染设置，供"重新渲染"用
     @last_result = nil       # { local:, comfy_path:, filename: }
-    @job = nil               # Z-Image 管线的多次尝试/择优/放大状态，见 on_render_zimage
+    @job = nil               # Flux 管线的多次尝试/择优/放大状态，见 on_render_flux
     @last_source_path = nil  # 当前结果对应的"渲染前"图（SketchUp 结构图，或"增强真实感"里用户上传的原图）——给结果窗口的滑动对比条用
 
     # ---- Ruby 侧界面文字（菜单 / 弹窗 / 保存对话框 / 错误）------------
     STRINGS = {
       'zh' => {
-        s_probe: '检查本地模型…', s_attempt: 'Z-Image 照片级出图（第 %d/%d 张）…', s_retry: '结构吻合度 %d%%，换种子重出…', s_upscale: '高分辨率细化 + SeedVR2 精修放大…', s_resize: '高分辨率细化 + 放大（未安装 SeedVR2）…',
+        s_probe: '检查本地模型…', s_attempt: 'Flux 照片级出图（第 %d/%d 张）…', s_retry: '结构吻合度 %d%%，换种子重出…', s_upscale: '放大到目标分辨率…', s_resize: '放大到目标分辨率…',
         s_extract: '提取模型信息…（大模型可能要几秒）', s_capture: '截取当前视角…', s_connect: '连接 ComfyUI…', s_upload: '上传结构图…', s_upref: '上传参考图…', s_build: '生成工作流…', s_submit: '提交到 ComfyUI…', s_processing: 'ComfyUI 处理中',
         menu_open: '打开渲染面板', menu_reload: '重新加载插件（开发）', menu_log: '打开日志文件夹',
         cmd_name: 'AI 渲染', cmd_tip: 'AI 渲染工作室',
@@ -53,7 +53,7 @@ module AydinCreative
         err_seealso: '（%s）— 详见 render.log', save_fail: '保存失败：'
       },
       'en' => {
-        s_probe: 'Checking local models…', s_attempt: 'Z-Image photoreal pass (%d/%d)…', s_retry: 'Structure match %d%%, re-rendering with a new seed…', s_upscale: 'High-res refine + SeedVR2 detail upscale…', s_resize: 'High-res refine + resize (SeedVR2 not installed)…',
+        s_probe: 'Checking local models…', s_attempt: 'Flux photoreal pass (%d/%d)…', s_retry: 'Structure match %d%%, re-rendering with a new seed…', s_upscale: 'Upscaling to target resolution…', s_resize: 'Upscaling to target resolution…',
         s_extract: 'Reading model info… (a few seconds on big models)', s_capture: 'Capturing the view…', s_connect: 'Connecting to ComfyUI…', s_upload: 'Uploading structure image…', s_upref: 'Uploading reference image…', s_build: 'Building workflow…', s_submit: 'Submitting to ComfyUI…', s_processing: 'ComfyUI is working',
         menu_open: 'Open render panel', menu_reload: 'Reload plugin (dev)', menu_log: 'Open log folder',
         cmd_name: 'AI Render', cmd_tip: 'AI Render Studio',
@@ -65,7 +65,7 @@ module AydinCreative
         err_seealso: '(%s) — see render.log', save_fail: 'Save failed: '
       },
       'ru' => {
-        s_probe: 'Проверка локальных моделей…', s_attempt: 'Z-Image фотореализм (%d/%d)…', s_retry: 'Совпадение структуры %d%%, повтор с новым seed…', s_upscale: 'SeedVR2 апскейл деталей…', s_resize: 'Масштабирование (SeedVR2 не установлен)…',
+        s_probe: 'Проверка локальных моделей…', s_attempt: 'Flux фотореализм (%d/%d)…', s_retry: 'Совпадение структуры %d%%, повтор с новым seed…', s_upscale: 'Upscaling…', s_resize: 'Upscaling…',
         s_extract: 'Чтение данных модели… (несколько секунд для больших)', s_capture: 'Снимок вида…', s_connect: 'Подключение к ComfyUI…', s_upload: 'Загрузка структурного изображения…', s_upref: 'Загрузка референса…', s_build: 'Сборка воркфлоу…', s_submit: 'Отправка в ComfyUI…', s_processing: 'ComfyUI обрабатывает',
         menu_open: 'Открыть панель рендеринга', menu_reload: 'Перезагрузить плагин (разр.)', menu_log: 'Открыть папку логов',
         cmd_name: 'AI Рендер', cmd_tip: 'AI Студия рендеринга',
@@ -77,7 +77,7 @@ module AydinCreative
         err_seealso: '(%s) — см. render.log', save_fail: 'Ошибка сохранения: '
       },
       'kk' => {
-        s_probe: 'Жергілікті модельдерді тексеру…', s_attempt: 'Z-Image фотошынайы рендер (%d/%d)…', s_retry: 'Құрылым сәйкестігі %d%%, жаңа seed-пен қайта…', s_upscale: 'SeedVR2 бөлшектерді үлкейту…', s_resize: 'Мақсатты өлшемге үлкейту (SeedVR2 жоқ)…',
+        s_probe: 'Жергілікті модельдерді тексеру…', s_attempt: 'Flux фотошынайы рендер (%d/%d)…', s_retry: 'Құрылым сәйкестігі %d%%, жаңа seed-пен қайта…', s_upscale: 'Upscaling…', s_resize: 'Upscaling…',
         s_extract: 'Модель ақпаратын оқу… (үлкен модельдерде бірнеше секунд)', s_capture: 'Көріністі түсіру…', s_connect: 'ComfyUI-ге қосылу…', s_upload: 'Құрылым суретін жүктеу…', s_upref: 'Үлгі суретті жүктеу…', s_build: 'Воркфлоу құру…', s_submit: 'ComfyUI-ге жіберу…', s_processing: 'ComfyUI жұмыс істеуде',
         menu_open: 'Рендер панелін ашу', menu_reload: 'Плагинді қайта жүктеу (әзірлеу)', menu_log: 'Журнал қалтасын ашу',
         cmd_name: 'AI Рендер', cmd_tip: 'AI Рендер студиясы',
@@ -100,8 +100,8 @@ module AydinCreative
     end
 
     # ================= 设置 =================
-    # 渲染只有一条管线：Z-Image Turbo + ControlNet + SeedVR2（2026-09-28 删掉了旧的 RealVisXL 引擎——
-    # 实测出图像线稿上色的插画，完全达不到照片级）。可调的只剩"自动择优"开关。
+    # 渲染引擎：Flux.2 Klein 9B（最初的 Flux 管线，见 flux_builder.rb）。中间试过的 RealVisXL、Z-Image
+    # 实测都不如它，已删除。可调的只剩"自动择优"开关。
     SETTINGS_SECTION = 'ars_render_studio'
     MAX_ATTEMPTS = 3            # 开"自动择优"时一次渲染最多出几张（本地出图不花钱，只花时间）
     GEOMETRY_PASS_SCORE = 0.55  # 结构吻合度低于这个就换种子重出（合成测试：对齐≈0.95，错位/丢物体≈0.3-0.4）
@@ -120,17 +120,16 @@ module AydinCreative
       rlog "save_settings ERROR: #{e.class}: #{e.message}"
     end
 
-    # 告诉面板：Z-Image 管线需要的模型齐不齐、缺什么、SeedVR2 有没有
+    # 告诉面板：Flux 需要的模型齐不齐、缺什么
     def push_model_status
       client = ComfyClient.new
       return unless client.online?
-      r = PhotoBuilder.resolve(client)
-      rlog "  models ok=#{r[:ok]} seedvr=#{!r[:seedvr].nil?} #{r[:models]}"
+      r = FluxBuilder.resolve(client)
+      rlog "  models ok=#{r[:ok]} #{r[:models]}"
       log_model_folders(r) unless r[:ok]
       @last_resolve = r
       dl = ->(list) { { count: list.size, gb: list.sum { |x| x[:gb].to_f }.round(1) } }
-      to_js('models', { ok: r[:ok], missing: r[:missing], seedvr: !r[:seedvr].nil?, seedvr_hint: PhotoBuilder.seedvr_hint,
-                        dl_required: dl.call(r[:downloads] || []), dl_seedvr: dl.call(r[:seedvr_downloads] || []),
+      to_js('models', { ok: r[:ok], missing: r[:missing], dl_required: dl.call(r[:downloads] || []),
                         downloading: Downloader.running?(WORK_DIR) })
       watch_download if Downloader.running?(WORK_DIR)
     rescue StandardError => e
@@ -140,8 +139,9 @@ module AydinCreative
     # ---- 一键下载缺失模型 ----
     def start_download(which)
       return watch_download if Downloader.running?(WORK_DIR) # 已经在下（比如关了面板又打开）
-      r = @last_resolve || PhotoBuilder.resolve(ComfyClient.new)
-      items = Array(which.to_s == 'seedvr' ? r[:seedvr_downloads] : r[:downloads])
+      r = @last_resolve || FluxBuilder.resolve(ComfyClient.new)
+      items = Array(r[:downloads])
+      _ = which
       return to_js('download', { error: '没有需要下载的文件', done: true }) if items.empty?
       rlog "download start (#{which}): #{items.map { |x| "#{x[:folder]}/#{x[:name]}" }.join(', ')}"
       pid = Downloader.start(items, ComfyClient.new, WORK_DIR)
@@ -169,7 +169,7 @@ module AydinCreative
 
     # 找不到模型时，把 ComfyUI 各模型文件夹里实际有什么全部写进 render.log，方便对照排查
     def log_model_folders(res)
-      rlog '  ---- Z-Image 模型检测没通过，ComfyUI 各文件夹实际内容：'
+      rlog '  ---- Flux 模型检测没通过，ComfyUI 各文件夹实际内容：'
       res[:missing].each { |line| rlog "  #{line.gsub("\n", ' ')}" }
       (res[:found] || {}).each do |folder, files|
         rlog "  [#{folder}] (#{files.size}) #{files.first(60).join(' | ')}"
@@ -397,76 +397,89 @@ module AydinCreative
         strength = 100 if strength > 100
         settings = load_settings
         rlog "opts: aspect=#{@aspect} res=#{opts[:resolution]} ai=#{strength} kind=#{opts[:kind]} preset=#{opts[:preset_key]}"
-        on_render_zimage(opts, v, strength, settings)
+        on_render_flux(opts, v, strength, settings)
       rescue StandardError, ScriptError => e
         rlog "on_render ABORTED: #{e.class}: #{e.message}"
         to_js('renderError', { message: "#{e.message}\n\n" + tr(:err_seealso, e.class) })
       end
     end
 
-    # ================= Z-Image 照片级管线 =================
-    # 1. Z-Image Turbo + ControlNet(SketchUp 真实边线) + img2img(SketchUp 截图) 出一张
-    # 2. GeometryCheck 拿线稿给它打"结构吻合度"，低于阈值就换种子重出，最多 MAX_ATTEMPTS 张
-    # 3. 最高分那张交给 SeedVR2 精修放大到目标分辨率（没装 SeedVR2 就普通放大）
-    # 每一步都是 ComfyUI 里一个独立任务：等待在后台线程，打分/决定下一步在主线程(轮询定时器)里。
-    def on_render_zimage(opts, v, strength, settings)
+    # ================= Flux 照片级管线 =================
+    # 1. ModelExtractor 提取视角里每个物体的形状/位置/尺寸/颜色/材质 → GROUND TRUTH 提示词
+    # 2. Flux.2 Klein：Image 1 = SketchUp 截图，Image 2/3 = 真实 3D 深度图/法线图，Image 4 = 风格参考图
+    # 3. 结构吻合度检查（SketchUp 线稿 vs 成品边缘），偏了就换种子重出，最多 MAX_ATTEMPTS 张，留最好的
+    # 4. 最好那张放大到目标分辨率（ESRGAN + lanczos）
+    def on_render_flux(opts, v, strength, settings)
       client = ComfyClient.new
       step(tr(:s_connect), 0.03) { raise tr(:err_comfy, client.base) unless client.online? }
-      res = step(tr(:s_probe), 0.04) { PhotoBuilder.resolve(client) }
+      res = step(tr(:s_probe), 0.04) { FluxBuilder.resolve(client) }
       log_model_folders(res) unless res[:ok]
       unless res[:ok]
-        tip = (res[:downloads] || []).empty? ? '' : "\n\n→ 面板右上「本地渲染引擎」下面有「一键下载」按钮，点它会自动下载到 ComfyUI 正确的文件夹。"
-        raise "Z-Image 管线还缺东西（按下面补齐后再试）：\n\n" +
-              res[:missing].join("\n") + tip
+        tip = (res[:downloads] || []).empty? ? '' : "\n\n→ 面板上「本地渲染引擎」下面有「一键下载」按钮。"
+        raise "Flux 管线还缺东西（按下面补齐后再试）：\n\n" + res[:missing].join("\n") + tip
       end
-      rlog "  models #{res[:models]} seedvr=#{res[:seedvr] || 'none'}"
+      rlog "  models #{res[:models]}"
 
       ctx = step(tr(:s_extract), 0.06) { ModelExtractor.extract(v) }
+      rlog "  rays_hit=#{ctx[:rays_hit]} mats=#{(ctx[:visible_materials] || []).size} objs=#{(ctx[:visible_objects] || []).size}"
       stamp = Time.now.strftime('%Y%m%d_%H%M%S')
       src = File.join(WORK_DIR, "source_#{stamp}.png")
-      # 调亮、关阴影截图：光照交给 AI 重新打（SketchUp 的暗面+阴影会让成品整体灰暗）
-      cap = step(tr(:s_capture), 0.08) { Capture.textured(v, src, shadows: false, bright: true, aspect: @aspect) }
-      rlog "  src #{File.size(src)} bytes #{cap[:w]}x#{cap[:h]} (bright, no shadows)"
+      cap = step(tr(:s_capture), 0.08) { Capture.textured(v, src, shadows: opts[:shadows], aspect: @aspect) }
+      rlog "  src #{File.size(src)} bytes #{cap[:w]}x#{cap[:h]}"
       @last_source_path = src
-      lines_path = File.join(WORK_DIR, "lines_#{stamp}.png")
-      lin = Capture.lines(v, lines_path, aspect: @aspect, clean: true)
-      raise '边线图生成失败——Z-Image 管线靠它锁结构，详见 render.log' unless lin
-      rlog "  lines clean=#{lin[:clean]}"
 
-      input_name, lines_name = step(tr(:s_upload), 0.10) { [client.stage_input(src), client.stage_input(lines_path)] }
-      vlm = client.node?('TextGenerate') && client.models('text_encoders').include?(PhotoBuilder::VISION_CLIP) ? PhotoBuilder::VISION_CLIP : nil
-      ref_name = nil
-      if vlm && opts[:ref_data_uri].to_s.start_with?('data:image')
-        ref_path = File.join(WORK_DIR, "ref_#{stamp}.png")
-        File.binwrite(ref_path, opts[:ref_data_uri].sub(%r{\Adata:image/[^;]+;base64,}, '').unpack1('m'))
-        ref_name = client.stage_input(ref_path)
+      # 深度图 + 法线图：真实 3D 模型射线采样（测速自适应，不会卡住 SketchUp）
+      depth_path = File.join(WORK_DIR, "depth_#{stamp}.png")
+      normal_path = File.join(WORK_DIR, "normal_#{stamp}.png")
+      geo = (Capture.geometry_maps(v, depth_path, normal_path, aspect: @aspect) rescue { depth: nil, normal: nil })
+      rlog "  geometry_maps depth=#{geo[:depth] ? 'ok' : 'skipped'} normal=#{geo[:normal] ? 'ok' : 'skipped'}"
+      # 线稿只给结构吻合度检查用
+      lines_path = File.join(WORK_DIR, "lines_#{stamp}.png")
+      lin = (Capture.lines(v, lines_path, aspect: @aspect, clean: true) rescue nil)
+      rlog "  lines #{lin ? "ok clean=#{lin[:clean]}" : 'skipped'}"
+
+      images = step(tr(:s_upload), 0.10) do
+        list = [client.stage_input(src)]
+        list << client.stage_input(depth_path) if geo[:depth]
+        list << client.stage_input(normal_path) if geo[:normal]
+        list
       end
+      ref_index = nil
+      if opts[:ref_data_uri].to_s.start_with?('data:image')
+        ext = opts[:ref_data_uri] =~ %r{\Adata:image/jpe?g} ? '.jpg' : '.png'
+        ref_path = File.join(WORK_DIR, "ref_#{stamp}#{ext}")
+        File.binwrite(ref_path, opts[:ref_data_uri].sub(%r{\Adata:image/[^;]+;base64,}, '').unpack1('m'))
+        images << client.stage_input(ref_path)
+        ref_index = images.size
+      end
+
+      vlm = client.node?('TextGenerate') && client.models('text_encoders').include?(FluxBuilder::VISION_CLIP) ? FluxBuilder::VISION_CLIP : nil
       preset_text = opts[:preset_key].to_s.empty? ? nil : Presets.text_for(opts[:mode], opts[:preset_key], opts[:kind])
       kind = opts[:kind] || 'exterior'
-      prompt = PhotoBuilder.prompt(kind: kind, ctx: ctx, preset: preset_text, user_prompt: opts[:user_prompt])
+      prompt = FluxBuilder.render_prompt(kind: kind, ctx: ctx, strength: strength, preset: preset_text,
+                                         user_prompt: opts[:user_prompt], has_depth: !geo[:depth].nil?,
+                                         has_normal: !geo[:normal].nil?, reference_index: ref_index)
       File.write(File.join(WORK_DIR, 'last_prompt.txt'), prompt) rescue nil
-      w, h = PhotoBuilder.output_dims(Capture.aspect_value(v, @aspect), opts[:resolution])
-      rlog "  vlm=#{vlm || 'off'} ref=#{ref_name || 'none'} target=#{w}x#{h} prompt=#{prompt.size}ch"
+      w, h = FluxBuilder.output_dims(Capture.aspect_value(v, @aspect), opts[:resolution])
+      rlog "  vlm=#{vlm || 'off'} images=#{images.size} ref=#{ref_index || 'none'} target=#{w}x#{h} prompt=#{prompt.size}ch"
 
       @job = {
-        stage: :attempt, attempts: 0, max: settings[:auto_retry] ? MAX_ATTEMPTS : 1, best: nil,
-        lines_path: lines_path, user_seed: opts[:seed], seedvr: res[:seedvr], w: w, h: h,
-        models: res[:models], prompt: prompt,
+        stage: :attempt, attempts: 0, max: settings[:auto_retry] && lin ? MAX_ATTEMPTS : 1, best: nil,
+        lines_path: lin ? lines_path : nil, user_seed: opts[:seed], w: w, h: h,
         build: lambda do |seed, tag|
-          PhotoBuilder.build_structure(input_filename: input_name, lines_filename: lines_name, models: res[:models],
-                                       prompt: prompt, strength: strength, seed: seed, tag: tag, vlm_model: vlm, kind: kind,
-                                       reference_filename: ref_name, lines_clean: lin[:clean])
+          FluxBuilder.build_edit(images: images, models: res[:models], prompt_text: prompt, seed: seed, tag: tag,
+                                 vlm: vlm, vlm_lead: FluxBuilder.vision_lead_in(kind))
         end
       }
-      start_zimage_attempt
+      start_flux_attempt
     end
 
-    def start_zimage_attempt
+    def start_flux_attempt
       job = @job
       job[:attempts] += 1
       n = job[:attempts]
       seed = n == 1 && job[:user_seed].to_i.positive? ? job[:user_seed].to_i : rand(1..2_147_483_646)
-      graph = job[:build].call(seed, "a#{n}")
+      graph = job[:build].call(seed, "flux_a#{n}")
       File.write(File.join(WORK_DIR, 'last_graph.json'), JSON.pretty_generate(graph)) rescue nil
       pid = ComfyClient.new.queue(graph)
       rlog "  attempt #{n}/#{job[:max]} queued #{pid} seed=#{seed}"
@@ -478,19 +491,19 @@ module AydinCreative
     end
 
     # 主线程：一个任务结束后决定下一步。返回最终结果；返回 nil 表示已经提交了下一个任务。
-    def zimage_job_step(image)
+    def flux_job_step(image)
       job = @job
       if job[:stage] == :attempt
-        score = GeometryCheck.score_files(job[:lines_path], image[:local])
+        score = job[:lines_path] ? GeometryCheck.score_files(job[:lines_path], image[:local]) : nil
         image[:score] = score
         rlog "  attempt #{job[:attempts]} structure score=#{score ? score.round(3) : 'n/a'}"
         best = job[:best]
         job[:best] = image if best.nil? || (score && (best[:score].nil? || score > best[:score]))
         if score && score < GEOMETRY_PASS_SCORE && job[:attempts] < job[:max]
           to_js('renderProgress', { pct: 0.12, note: format(tr(:s_retry), (score * 100).round) })
-          start_zimage_attempt
+          start_flux_attempt
         else
-          start_zimage_finish
+          start_flux_finish
         end
         return nil
       end
@@ -499,20 +512,17 @@ module AydinCreative
       image
     end
 
-    def start_zimage_finish
+    def start_flux_finish
       job = @job
       job[:stage] = :finish
       client = ComfyClient.new
       name = client.stage_input(job[:best][:local])
       esr = client.models('upscale_models').find { |f| f =~ /esrgan|4x/i }
-      graph = PhotoBuilder.build_finish(input_filename: name, models: job[:models], prompt: job[:prompt],
-                                        width: job[:w], height: job[:h], seed: rand(1..2_147_483_646),
-                                        seedvr: job[:seedvr], esrgan: esr)
-      note = tr(job[:seedvr] ? :s_upscale : :s_resize)
+      graph = FluxBuilder.build_upscale(input_filename: name, width: job[:w], height: job[:h], esrgan: esr)
       File.write(File.join(WORK_DIR, 'last_finish_graph.json'), JSON.pretty_generate(graph)) rescue nil
       pid = client.queue(graph)
-      rlog "  finish queued #{pid} (refine + #{job[:seedvr] ? 'seedvr2' : 'resize'}) #{job[:w]}x#{job[:h]} esrgan=#{esr || 'none'}"
-      run_job(phase: 'render', note: note) do |state|
+      rlog "  upscale queued #{pid} #{job[:w]}x#{job[:h]} esrgan=#{esr || 'none'}"
+      run_job(phase: 'render', note: tr(:s_upscale)) do |state|
         wait_and_fetch(pid) { |q| state[:pct] = 0.84 + q.to_f * 0.14 }
       end
     end
@@ -571,13 +581,13 @@ module AydinCreative
 
         if st[:done]
           stop_poll_timer
-          # Z-Image 管线里某一步失败了，但手里已经有能用的图 → 用它，不整单报错
+          # 管线里某一步失败了，但手里已经有能用的图 → 用它，不整单报错
           if st[:error] && st[:phase] == 'render' && @job && @job[:best]
             rlog "  job step failed (#{st[:error]}), continuing with best image so far"
             st[:error] = nil
             if @job[:stage] == :attempt
               begin
-                start_zimage_finish
+                start_flux_finish
                 next
               rescue StandardError => e
                 rlog "  finish could not start: #{e.message}"
@@ -594,9 +604,9 @@ module AydinCreative
           else
             if st[:phase] == 'render' && @job
               begin
-                final = zimage_job_step(st[:image])
+                final = flux_job_step(st[:image])
               rescue StandardError => e
-                rlog "zimage_job_step ERROR: #{e.class}: #{e.message}"
+                rlog "flux_job_step ERROR: #{e.class}: #{e.message}"
                 final = @job && @job[:best] ? @job[:best] : st[:image]
                 @job = nil
               end
@@ -696,15 +706,13 @@ module AydinCreative
       UI.start_timer(0.5, false) { on_render(JSON.generate(opts)) }
     end
 
-    # AI 调色 / 上传图片增强真实感：都是 Z-Image 低降噪 img2img（PhotoBuilder.build_finish），
-    # 增强那个再加 SeedVR2 精修。调色不过 SeedVR2——它的 LAB 颜色对齐会把刚调的色往回拉。
+    # AI 调色 / 上传图片增强真实感：都用 Flux.2 Klein 图像编辑，Image 1 = 要处理的图。
     def ai_grade(instruction)
       return to_result_js('gradeError', { message: tr(:err_no_result) }) unless @last_result && File.exist?(@last_result[:local])
       return to_result_js('gradeError', { message: tr(:err_busy) }) if @render_thread&.alive?
 
       rlog "\n===== AI grade: #{instruction} ====="
-      touchup(@last_result[:local], mode: 'grade', prompt: PhotoBuilder.grade_prompt(instruction),
-                                    denoise: PhotoBuilder::GRADE_DENOISE, seedvr: false)
+      touchup(@last_result[:local], mode: 'grade', prompt: FluxBuilder.grade_prompt(instruction))
     end
 
     # 不需要已有渲染结果——随手拖一张别的渲染软件（Vray/Corona/Enscape/Lumion/D5…）出的图进来也能用。
@@ -717,18 +725,17 @@ module AydinCreative
       up_path = File.join(WORK_DIR, "upload_#{Time.now.strftime('%Y%m%d_%H%M%S')}#{ext}")
       File.binwrite(up_path, data_uri.sub(%r{\Adata:image/[^;]+;base64,}, '').unpack1('m'))
       @last_source_path = up_path
-      touchup(up_path, mode: 'enhance', prompt: PhotoBuilder.enhance_prompt,
-                       denoise: PhotoBuilder.enhance_denoise(strength), seedvr: true)
+      touchup(up_path, mode: 'enhance', prompt: FluxBuilder.enhance_prompt(strength))
     rescue StandardError => e
       rlog "enhance_upload ABORTED: #{e.class}: #{e.message}"
       to_result_js('gradeError', { message: e.message })
     end
 
-    def touchup(path, mode:, prompt:, denoise:, seedvr:)
+    def touchup(path, mode:, prompt:)
       client = ComfyClient.new
       raise tr(:err_comfy, client.base) unless client.online?
-      res = PhotoBuilder.resolve(client)
-      raise "Z-Image 模型不齐：\n#{res[:missing].join("\n")}" unless res[:ok]
+      res = FluxBuilder.resolve(client)
+      raise "Flux 模型不齐：\n#{res[:missing].join("\n")}" unless res[:ok]
 
       # 输出尺寸 = 原图尺寸（8 的倍数，长边最多 3840）
       rep = Sketchup::ImageRep.new(path)
@@ -736,12 +743,12 @@ module AydinCreative
       w = (rep.width * k).round / 8 * 8
       h = (rep.height * k).round / 8 * 8
       name = client.stage_input(path)
-      graph = PhotoBuilder.build_finish(input_filename: name, models: res[:models], prompt: prompt, width: w, height: h,
-                                        seed: rand(1..2_147_483_646), seedvr: seedvr ? res[:seedvr] : nil,
-                                        denoise: denoise, tag: "#{mode}_final")
+      esr = client.models('upscale_models').find { |f| f =~ /esrgan|4x/i }
+      graph = FluxBuilder.build_edit(images: [name], models: res[:models], prompt_text: prompt, seed: rand(1..2_147_483_646),
+                                     tag: "#{mode}_final", final_size: [w, h], esrgan: esr)
       File.write(File.join(WORK_DIR, "last_#{mode}_graph.json"), JSON.pretty_generate(graph)) rescue nil
       pid = client.queue(graph)
-      rlog "  #{mode} queued #{pid} #{w}x#{h} denoise=#{denoise}"
+      rlog "  #{mode} queued #{pid} #{w}x#{h}"
       to_result_js('gradeProgress', { pct: 0.1, mode: mode })
       run_job(phase: 'grade', mode: mode, note: mode) do |state|
         wait_and_fetch(pid) { |q| state[:pct] = 0.1 + q.to_f * 0.85 }
@@ -825,7 +832,7 @@ module AydinCreative
       rescue StandardError
         nil
       end
-      %w[presets model_extractor capture comfy_client geometry_check downloader photo_builder main].each do |f|
+      %w[presets model_extractor capture comfy_client geometry_check downloader flux_builder main].each do |f|
         load File.join(__dir__, "#{f}.rb")
       end
       UI.messagebox(tr(:reloaded))

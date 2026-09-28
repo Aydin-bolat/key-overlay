@@ -1,57 +1,38 @@
 # AI 渲染工作室 (AI Render Studio) — SketchUp 插件
 
-SketchUp 一键 AI 照片级渲染，**全部在本地 ComfyUI 里运行，不用任何在线 API**。
-`extension/` 就是 `F:\SU插件\extension` 的内容，同一个文件夹里还有 Material Painter 插件。
+SketchUp 一键 AI 照片级渲染，全部在本地 ComfyUI 里运行，不用任何在线 API。
+`extension/` 就是 `F:\SU插件\extension` 的内容（同一个文件夹里还有 Material Painter 插件）。
 
-## 0.2.0：本地照片级管线
+## 渲染引擎：Flux.2 Klein 9B（最初的 Flux 管线）
 
-```
-SketchUp 视图截图 ─┐
-                   ├─► Z-Image Turbo + Fun ControlNet Union ─► 结构吻合度检查 ─► Z-Image 高分辨率细化 ─► SeedVR2 7B 精修放大 ─► 成品
-SketchUp 真实边线 ─┘   （img2img，边线锁结构）                  （偏差大就换种子重出，最多 3 张，留最好的）
-```
+中间试过 RealVisXL + ControlNet、Z-Image Turbo + ControlNet，实测都不如最初的 Flux（前者像线稿上色，后者画成了另一个房间），已全部删除，回到 Flux：
 
-| 环节 | 用什么 | 为什么 |
-|---|---|---|
-| 出图 | **Z-Image Turbo**（阿里通义，6B，8 步） | 目前本地开源模型里照片真实感最好的一档，16GB 显存能跑；文本编码器是 Qwen3-4B，能读长描述，不像 SDXL 只读 77 个 token |
-| 锁结构 | **Z-Image Fun ControlNet Union** | 输入不是从截图里猜出来的边缘，而是 SketchUp 从 3D 模型直接渲出的真实棱边；同时从 SketchUp 截图的真实像素出发做 img2img，材质颜色分区也保留 |
-| 兜底 | 结构吻合度检查 | 把照片边缘和模型棱边做对比打分，偏了就自动换种子重出，最后显示在结果窗口右上角 |
-| 精修放大 | **SeedVR2 7B int8**（字节，一步扩散） | 放大时补出真实的微观纹理（木纹、织物、石材），不改几何，并用 LAB 把颜色对齐回原图。取代原来的"RealVisXL 低降噪重画 + ESRGAN" |
+1. **提取模型信息**：从 SketchUp 当前视角里提取每个参与渲染的物体——名称、屏幕位置、真实尺寸、主色/副色、距离，以及每种材质（带物理质感描述：光滑/硬度/绒毛…）、相机、太阳，写成 GROUND TRUTH 交给模型，防止变形、改物体、丢物体；
+2. **看图识物**（gemma 视觉模型，可选）：构件名是乱码时补上物体类别（床不会被认成沙发）；
+3. **参考图**：Image 1 = SketchUp 截图，Image 2/3 = 从真实 3D 模型射线采样的深度图 / 法线图，Image 4 = 你给的风格参考图（可选）；
+4. **改动预算**：「AI 强度」写成 CHANGE BUDGET 指令，0 = 一个物件都不改；
+5. **结构吻合度检查**：出图后用 SketchUp 线稿给结果打分，偏差大就自动换种子重出，最多 3 张，留分数最高的（面板上可关）；
+6. 最好那张放大到目标分辨率（ESRGAN + lanczos）。
 
-以上都是 ComfyUI 的原生节点，节点接法照 ComfyUI 官方模板（`image_z_image_turbo_fun_union_controlnet`、`utility_seedvr2_7b_int8_upscale_image`），**不需要装任何自定义节点**。
+节点接法照 ComfyUI 官方模板 `image_flux2_klein_9b_kv_image_edit`（ReferenceLatent、FluxKVCache、CFGGuider cfg 1、euler、Flux2Scheduler 4 步）。提示词各段是最初写给 Flux 的原文。
 
-旧的 RealVisXL（SDXL）引擎已经删除：实测出图像线稿上色的插画，达不到照片级。结果窗口里的「AI 调色」和「上传图片增强真实感」也改成了 Z-Image 低降噪 img2img（增强真实感再加 SeedVR2）。
+结果窗口的「AI 调色」「上传图片增强真实感」也用 Flux.2 Klein 图像编辑。
 
-## 需要下载的模型
+## 需要的模型（面板会自动检测，缺的可以一键下载）
 
-先把 **ComfyUI Desktop 更新到最新版**：Z-Image ControlNet 和 SeedVR2 的原生节点只有新版才有。
+| 放到 `ComfyUI/models/` 下的 | 文件 |
+|---|---|
+| `diffusion_models/` | flux-2-klein-9b-kv-fp8.safetensors |
+| `text_encoders/` | qwen_3_8b_fp8mixed.safetensors |
+| `vae/` | flux2-vae.safetensors |
+| `text_encoders/`（可选，看图识物） | gemma4_e4b_it_fp8_scaled.safetensors |
+| `upscale_models/`（可选，放大用） | 任意 RealESRGAN 4x |
 
-| 放到 `ComfyUI/models/` 下的 | 文件 | 下载地址 |
-|---|---|---|
-| `diffusion_models/` | z_image_turbo_bf16.safetensors | https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors |
-| `text_encoders/` | qwen_3_4b.safetensors | https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors |
-| `vae/` | ae.safetensors | https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors |
-| `model_patches/` | Z-Image-Turbo-Fun-Controlnet-Union.safetensors | https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors |
-| `diffusion_models/` | seedvr2_7b_int8_convrot.safetensors（推荐） | https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/diffusion_models/seedvr2_7b_int8_convrot.safetensors |
-| `vae/` | seedvr2_ema_vae_fp16.safetensors（推荐） | https://huggingface.co/Comfy-Org/SeedVR2/resolve/main/vae/seedvr2_ema_vae_fp16.safetensors |
-
-补充说明：
-- ControlNet 也有 2.1 版（`alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union-2.1`），放进 `model_patches/` 后插件会优先用它。
-- 显存吃紧的话，SeedVR2 可以换成 3B 版：`seedvr2_3b_int8_convrot.safetensors`，同一个仓库里有。
-- SeedVR2 是可选的。没装的话，插件会用普通放大（ESRGAN + lanczos），照样能出图，只是细节差一些。
-- 插件按文件名自动识别模型，不用改代码。打开渲染面板时，最上面会列出缺哪些文件，并提供**一键下载**按钮：自动下到 ComfyUI 实际使用的 models 文件夹，连不上 huggingface.co 时自动改用 hf-mirror.com，支持断点续传，下完不用重启 ComfyUI。
-
-国内下载 HuggingFace 慢的话，可以把上面地址里的 `huggingface.co` 换成 `hf-mirror.com`。
-
-## 安装 / 更新
-
-1. 用本仓库的 `extension/` 覆盖 `F:\SU插件\extension`。
-2. 在 SketchUp 里点「扩展 → AI 渲染工作室 → 重新加载插件（开发）」，或者直接重启 SketchUp。
-3. 打开面板，确认模型状态是 ✓（缺的话点「一键下载」），场景类型选对（室内 / 外观），AI 强度保持 0 到 20（只换材质和光照）。
+一键下载会问 ComfyUI 要实际的模型文件夹，连不上 huggingface.co 时自动改用 hf-mirror.com，支持断点续传，在独立后台进程里下载（关掉 SketchUp 也不停）。
 
 ## 排查
 
 日志都在 `%TEMP%\ai_render_studio\`：
-- `render.log`：每一步的记录，包括每一张的结构吻合度分数和选用的模型文件。
-- `last_prompt.txt`：最近一次的提示词。
-- `last_graph.json` / `last_finish_graph.json`：最近一次提交给 ComfyUI 的工作流。可以拖进 ComfyUI 界面里直接看、直接调参。
+- `render.log`：每一步的记录，包括每一张的结构吻合度分数和选用的模型文件；
+- `last_prompt.txt`：最近一次的完整提示词（含 GROUND TRUTH）；
+- `last_graph.json`：最近一次提交给 ComfyUI 的工作流，可以拖进 ComfyUI 界面里直接看、直接调参。
