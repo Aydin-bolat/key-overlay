@@ -1,0 +1,157 @@
+:root {
+  --bg: #1e1f24;
+  --panel: #26272e;
+  --border: #3a3b44;
+  --text: #e8e8ec;
+  --muted: #8b8c96;
+  --accent: #4f8cff;
+  --accent-hover: #6fa2ff;
+  --danger: #ff5d5d;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Microsoft YaHei", "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+#app { padding: 12px 14px 24px; }
+
+header { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 8px; }
+header h1 { font-size: 16px; margin: 0; }
+.muted { color: var(--muted); font-size: 12px; }
+
+.box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+
+button {
+  background: #333540;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 12px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+button:hover { background: #3d3f4c; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { background: var(--accent-hover); }
+button.toggle-btn.active { background: var(--accent); border-color: var(--accent); }
+button.icon-btn { display: inline-flex; align-items: center; gap: 5px; }
+button.icon-btn.active { background: var(--accent); border-color: var(--accent); }
+button.icon-btn svg { flex: none; }
+
+.tabs { display: flex; gap: 4px; margin-bottom: 10px; border-bottom: 1px solid var(--border); }
+.tab-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 8px 4px;
+  color: var(--muted);
+}
+.tab-btn.active { color: var(--text); border-bottom-color: var(--accent); }
+
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.field { margin-bottom: 12px; }
+.field label { display: block; margin-bottom: 4px; }
+.field select, .field input[type="text"] {
+  width: 100%;
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.slider-field input[type="range"] { width: 100%; }
+.val { color: var(--accent); font-variant-numeric: tabular-nums; }
+.inline-check { display: inline-flex; align-items: center; gap: 4px; }
+
+.hint { color: var(--muted); font-size: 11.5px; line-height: 1.5; margin-top: 4px; }
+
+.paint-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.paint-toolbar label { display: flex; align-items: center; gap: 6px; }
+.paint-toolbar input[type="range"] { width: 100px; }
+.paint-toolbar input[type="color"] {
+  width: 30px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 4px; background: none;
+}
+
+.canvas-view-row { align-items: center; }
+button.icon-btn.small { padding: 4px 10px; font-size: 15px; line-height: 1; }
+
+/* #canvas-viewport 是固定可见的"取景框"（overflow hidden），#canvas-stage 是里面
+   实际承载画布的层，缩放/平移只对 stage 做 CSS transform——canvas 内部像素分辨率
+   完全不变，getBoundingClientRect 会自动把 transform 算进去，所以画笔坐标换算逻辑
+   不用跟着改。 */
+#canvas-viewport {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  background:
+    linear-gradient(45deg, #2c2d34 25%, transparent 25%),
+    linear-gradient(-45deg, #2c2d34 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #2c2d34 75%),
+    linear-gradient(-45deg, transparent 75%, #2c2d34 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-color: #1a1a1e;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 10px;
+  touch-action: none;
+}
+/* #canvas-stage 的 width/height/每个子 canvas 的 width/height/top/left 都由 JS
+   按真实像素设内联样式（贴图平铺后整体尺寸、以及贴图本体在这块大画布里的偏移位置都是
+   算出来的，写死在 CSS 里没法适配），这里只兜底 position。 */
+#canvas-stage {
+  position: absolute;
+  top: 0; left: 0;
+  transform-origin: 0 0;
+}
+#canvas-stage canvas { position: absolute; }
+#paint-canvas { cursor: crosshair; outline: 2px solid var(--accent); outline-offset: -1px; }
+#tile-bg-canvas { pointer-events: none; opacity: 0.55; }
+#uv-canvas, #cursor-canvas, #handles-canvas { pointer-events: none; }
+#canvas-empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center; padding: 20px;
+  pointer-events: none;
+}
+
+#msg-box {
+  position: fixed;
+  left: 14px; right: 14px; bottom: 14px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  background: #2e3550;
+  border: 1px solid var(--accent);
+}
+#msg-box.error { background: #402525; border-color: var(--danger); color: #ffd6d6; }
+#msg-box.hidden { display: none; }

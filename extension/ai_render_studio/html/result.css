@@ -1,0 +1,80 @@
+:root{
+  --bg:#0f1115; --card:#1e222b; --line:#2a2f3a; --text:#e6e8ec;
+  --muted:#9aa2b1; --accent:#2563eb; --err:#ef4444;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0;height:100%;background:#0b0d10;color:var(--text);
+  font:13px/1.5 "Segoe UI","Microsoft YaHei UI",system-ui,sans-serif}
+#wrap{position:relative;width:100%;height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
+#hint{position:absolute;bottom:10px;left:0;right:0;text-align:center;color:var(--muted);font-size:12px;
+  pointer-events:none;opacity:.7}
+.hidden{display:none!important}
+
+/* ---- 滑动对比条：#compare 的实际像素宽高由 result.js 算好写成内联样式
+   （两张图叠在一起用 object-fit 没法像单张 <img> 那样自动"contain"，
+   得先算出跟 after 图原生比例一致的盒子，两张图再各自铺满这个盒子）。 ---- */
+#compare{position:relative;box-shadow:0 8px 50px rgba(0,0,0,.6);user-select:none;overflow:hidden;
+  display:none;touch-action:none}
+#compare.ready{display:block}
+#img-after,#img-before{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;
+  -webkit-user-drag:none}
+#img-before{clip-path:inset(0 50% 0 0)}
+#compare-handle{position:absolute;top:0;bottom:0;left:50%;width:0;cursor:ew-resize;
+  border-left:2px solid rgba(255,255,255,.85);transform:translateX(-1px)}
+#compare-handle::after{content:'';position:absolute;top:50%;left:50%;width:34px;height:34px;
+  transform:translate(-50%,-50%);border-radius:50%;background:rgba(20,22,28,.85);
+  border:2px solid rgba(255,255,255,.85)}
+#compare-handle::before{content:'⟷';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  color:#fff;font-size:15px;z-index:1}
+.compare-label{position:absolute;top:10px;background:rgba(8,9,12,.6);color:#fff;font-size:11px;
+  padding:3px 9px;border-radius:5px;pointer-events:none;letter-spacing:.02em}
+#label-before{left:10px}
+#label-after{right:10px}
+
+#menu{position:fixed;z-index:20;background:var(--card);border:1px solid var(--line);border-radius:8px;
+  padding:5px;display:flex;flex-direction:column;min-width:150px;box-shadow:0 10px 40px rgba(0,0,0,.5)}
+#menu button{background:transparent;border:0;color:var(--text);text-align:left;padding:8px 10px;
+  border-radius:6px;cursor:pointer;font:inherit}
+#menu button:hover{background:var(--accent)}
+
+#grade-box{position:fixed;z-index:20;left:50%;top:50%;transform:translate(-50%,-50%);
+  background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;width:min(520px,90vw);
+  box-shadow:0 20px 60px rgba(0,0,0,.6)}
+#grade-box label{display:block;color:var(--muted);font-size:12px;margin-bottom:8px}
+#grade-box textarea{width:100%;background:#12151b;color:var(--text);border:1px solid var(--line);
+  border-radius:7px;padding:8px;font:inherit;resize:vertical}
+#grade-box .row{display:flex;gap:8px;margin-top:10px}
+#grade-box button{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:7px;
+  padding:7px 14px;cursor:pointer;font:inherit}
+#grade-box button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+#grade-box button.ghost{background:transparent}
+
+#enhance-box{position:fixed;z-index:20;left:50%;top:50%;transform:translate(-50%,-50%);
+  background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px;width:min(520px,90vw);
+  box-shadow:0 20px 60px rgba(0,0,0,.6)}
+#enhance-box label{display:block;color:var(--muted);font-size:12px;margin:10px 0 6px}
+#enhance-box label:first-child{margin-top:0}
+#enhance-box label b{color:var(--accent)}
+#enhance-box .tiny{font-size:11px;color:#6b7280;margin:6px 0 0}
+#enhance-box .dropzone{border:1.5px dashed var(--line);border-radius:8px;padding:16px;text-align:center;
+  color:var(--muted);cursor:pointer;font-size:12px}
+#enhance-box .dropzone.drag{border-color:var(--accent);color:var(--text)}
+#enhance-preview{display:block;max-width:100%;max-height:140px;margin:8px auto 0;border-radius:6px}
+#enhance-box input[type=range]{width:100%}
+#enhance-box .row{display:flex;gap:8px;margin-top:12px}
+#enhance-box button{border:1px solid var(--line);background:var(--card);color:var(--text);border-radius:7px;
+  padding:7px 14px;cursor:pointer;font:inherit}
+#enhance-box button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+#enhance-box button.ghost{background:transparent}
+
+#progress{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;background:rgba(8,9,12,.82)}
+#ring{width:44px;height:44px;border-radius:50%;border:4px solid var(--line);border-top-color:var(--accent);
+  animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#progress-note{color:var(--muted)}
+
+#toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--card);
+  border:1px solid var(--line);border-radius:8px;padding:10px 16px;font-size:12px;z-index:30}
+#toast.err{border-color:var(--err);color:#f0b4b4}

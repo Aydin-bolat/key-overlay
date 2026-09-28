@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>材质工坊</title>
+<link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>材质工坊</h1>
+      <div id="sel-info" class="muted">未选中任何面</div>
+    </header>
+
+    <section class="box">
+      <div class="btn-row">
+        <button id="btn-import">导入贴图…</button>
+        <button id="btn-apply-mat">应用当前材质到选中面</button>
+        <button id="btn-eyedrop" class="icon-btn" title="吸取模型中已有的材质来编辑">
+          <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+            <path fill="currentColor" d="M20.71 5.63l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-3.12 3.12-1.93-1.91-1.41 1.41 1.42 1.42L3 16.25V21h4.75l8.92-8.92 1.42 1.42 1.41-1.41-1.92-1.92 3.12-3.12c.4-.4.4-1.03.01-1.42zM6.92 19H5v-1.92l8.06-8.06 1.92 1.92L6.92 19z"/>
+          </svg>
+          <span>吸管</span>
+        </button>
+      </div>
+    </section>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="transform">贴图变换</button>
+      <button class="tab-btn" data-tab="paint">画笔</button>
+    </nav>
+
+    <section id="tab-transform" class="tab-panel active">
+      <div class="field">
+        <label>映射模式</label>
+        <select id="mode-select">
+          <option value="perface">跟随每个面（默认）</option>
+          <option value="planar">共享平面投影（适合弯曲/多面物体，如床品褶皱、沙发靠垫）</option>
+          <option value="cylindrical">圆柱投影（适合完整圆柱体侧面，如柱子、桶、罐子——侧面沿轴展开成矩形，上下圆盘请单独用"跟随每个面"）</option>
+        </select>
+      </div>
+
+      <div class="field slider-field">
+        <label>旋转 <span id="val-rot" class="val">0</span>°</label>
+        <input type="range" id="rot" min="-180" max="180" step="1" value="0">
+      </div>
+
+      <div class="field">
+        <label><input type="checkbox" id="lock-aspect" checked> 锁定 X/Y 缩放比例</label>
+      </div>
+      <div class="field slider-field">
+        <label>缩放 X <span id="val-sx" class="val">100</span>%</label>
+        <input type="range" id="sx" min="10" max="500" step="1" value="100">
+      </div>
+      <div class="field slider-field">
+        <label>缩放 Y <span id="val-sy" class="val">100</span>%</label>
+        <input type="range" id="sy" min="10" max="500" step="1" value="100">
+      </div>
+
+      <div class="field slider-field">
+        <label>X 方向移动 <span id="val-ou" class="val">0</span></label>
+        <input type="range" id="ou" min="-100" max="100" step="1" value="0">
+      </div>
+      <div class="field slider-field">
+        <label>Y 方向移动 <span id="val-ov" class="val">0</span></label>
+        <input type="range" id="ov" min="-100" max="100" step="1" value="0">
+      </div>
+
+      <div class="btn-row">
+        <button id="btn-apply" class="primary">应用到选中面</button>
+        <button id="btn-reset">重置</button>
+      </div>
+      <p class="hint">先在 SketchUp 里选中一个或多个面，再拖动上面的滑块（松开鼠标即实时应用）。
+      "共享平面投影"适合选中一整片由很多小面拼成的弯曲表面——会自动找一个最贴合的平面来铺贴图，
+      所有选中的面共用同一套坐标，避免每个小面各画各的、接缝对不上。</p>
+    </section>
+
+    <section id="tab-paint" class="tab-panel">
+      <div class="btn-row">
+        <button id="btn-load-paint">载入当前材质到画布</button>
+        <label class="inline-check"><input type="checkbox" id="show-uv" checked> 显示 UV 参考线（整个模型用到这个材质的地方）</label>
+      </div>
+      <div class="paint-toolbar">
+        <label>颜色 <input type="color" id="brush-color" value="#ff2d2d"></label>
+        <label>不透明度 <span id="val-opacity" class="val">100</span>%
+          <input type="range" id="brush-opacity" min="0" max="100" value="100">
+        </label>
+        <label>笔刷大小 <span id="val-size" class="val">16</span>px
+          <input type="range" id="brush-size" min="1" max="150" value="16">
+        </label>
+        <label>硬度 <span id="val-hardness" class="val">85</span>%
+          <input type="range" id="brush-hardness" min="0" max="100" value="85">
+        </label>
+        <button id="btn-eraser" class="toggle-btn">橡皮擦</button>
+        <button id="btn-undo">撤销</button>
+      </div>
+      <div class="btn-row canvas-view-row">
+        <button id="btn-zoom-out" class="icon-btn small">−</button>
+        <span id="zoom-level" class="val">100%</span>
+        <button id="btn-zoom-in" class="icon-btn small">+</button>
+        <button id="btn-zoom-reset">重置视图</button>
+        <span class="muted">滚轮缩放 · 左键在灰白虚影区拖动 / 中键或右键拖动 = 平移视图</span>
+      </div>
+      <p class="hint" id="uv-pick-hint"><b>Ctrl+点击</b>：只选中点到的那一个面（替换掉之前选的）　·
+      <b>Shift+Ctrl+点击</b>：在已选的基础上再加选一个，可以一个个点着挑　·
+      <b>Ctrl+拖拽</b>：框选范围内的所有面。选中后会出现三种手柄——橙色角点拖动缩放（按住
+      <b>Shift</b> 拖角点可以 X/Y 不同比例缩放，不按 Shift 保持等比）、青色圆点拖动旋转、
+      正中间绿色方块拖动移动；手柄以外的地方照常可以画笔（背景平铺图案不会跟着这些操作动，
+      只有选中的这几块会变）。</p>
+      <div id="canvas-viewport">
+        <div id="canvas-stage">
+          <canvas id="tile-bg-canvas" width="512" height="512"></canvas>
+          <canvas id="paint-canvas" width="512" height="512"></canvas>
+          <canvas id="uv-canvas" width="512" height="512"></canvas>
+          <canvas id="handles-canvas" width="512" height="512"></canvas>
+          <canvas id="cursor-canvas" width="512" height="512"></canvas>
+        </div>
+        <div id="canvas-empty" class="muted">点上面「载入当前材质到画布」开始</div>
+      </div>
+      <div class="btn-row">
+        <button id="btn-save-paint" class="primary">保存贴图到…</button>
+      </div>
+      <p class="hint">灰白虚影区是这个材质在模型上重复平铺后的样子（会跟着你的画笔实时更新，
+      只是预览，不能在上面画）——中间那一块带清楚边框的才是真正能画的那一整张贴图。画完松开鼠标，
+      SketchUp 里的模型会立即跟着变（临时预览，磁盘上的文件还没改）；点保存会弹出文件另存对话框，
+      你自己选位置和文件名（默认记住你上次存的文件夹，方便以后找），保存后才是真正定型。画布内容
+      在保存前的撤销靠上面的「撤销」按钮。</p>
+    </section>
+
+    <div id="msg-box" class="hidden"></div>
+  </div>
+<script src="panel.js"></script>
+</body>
+</html>

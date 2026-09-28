@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Render Studio</title>
+<link rel="stylesheet" href="dialog.css">
+</head>
+<body>
+<div id="app">
+
+  <section id="stage">
+    <div id="view-wrap">
+      <div id="snap-box">
+        <img id="snap" alt="" draggable="false">
+        <div id="frame-hole"></div>
+        <div id="frame-label"></div>
+      </div>
+      <div id="snap-msg" hidden>
+        <b data-i18n="snap_fail_title">没截到 SketchUp 视图</b>
+        <span data-i18n="snap_fail_msg">点下方「刷新相机视图」重试。渲染仍然可用。</span>
+      </div>
+      <div id="progress" class="hidden">
+        <div id="progress-ring"></div>
+        <div id="progress-note" data-i18n="preparing">准备中…</div>
+        <div id="progress-track"><div id="progress-fill"></div></div>
+        <button data-act="cancel_render" class="ghost small" data-i18n="cancel">取消</button>
+      </div>
+      <div id="err-box" class="hidden">
+        <b data-i18n="render_error">渲染出错</b>
+        <pre id="err-text"></pre>
+        <div>
+          <button data-act="open_log" class="ghost small" data-i18n="open_log_folder">打开日志文件夹</button>
+          <button data-act="err-close" class="ghost small" data-i18n="close">关闭</button>
+        </div>
+      </div>
+    </div>
+    <div id="view-bar">
+      <button id="refresh-btn" data-i18n="refresh_view">⟳ 刷新相机视图</button>
+      <span class="hint" data-i18n="view_hint">在 SketchUp 里调好角度，然后点这里。暗色部分不参与渲染。</span>
+    </div>
+  </section>
+
+  <aside id="panel">
+    <div class="row">
+      <select id="lang" title="Language"></select>
+      <span id="comfy-dot" class="dot"></span>
+      <span id="comfy-text" data-i18n="comfy_checking">检查 ComfyUI…</span>
+    </div>
+
+    <div class="field">
+      <label data-i18n="scene_type">场景类型</label>
+      <div class="seg" id="kind">
+        <button data-kind="exterior" class="on" data-i18n="exterior">建筑外观</button>
+        <button data-kind="interior" data-i18n="interior">室内空间</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label data-i18n="aspect_ratio">画面比例</label>
+      <div class="seg wrap" id="aspect">
+        <button data-aspect="window" class="on" data-i18n="follow_window">跟随窗口</button>
+        <button data-aspect="16:9">16:9</button>
+        <button data-aspect="9:16">9:16</button>
+        <button data-aspect="4:3">4:3</button>
+        <button data-aspect="3:4">3:4</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label data-i18n="resolution">输出清晰度</label>
+      <select id="resolution">
+        <option value="240p" data-i18n="res_draft">240p（草稿）</option>
+        <option value="360p">360p</option>
+        <option value="480p">480p</option>
+        <option value="720p">720p</option>
+        <option value="1080p" selected>1080p</option>
+        <option value="1440p" data-i18n="res_2k">1440p（2K）</option>
+        <option value="2160p" data-i18n="res_4k">2160p（4K）</option>
+      </select>
+      <p class="muted tiny" id="res-hint"></p>
+    </div>
+
+    <div class="field">
+      <label data-i18n="time_label">时间</label>
+      <div class="seg" id="mode">
+        <button data-mode="day" class="on" data-i18n="day">☀ 白天</button>
+        <button data-mode="night" data-i18n="night">🌙 黑夜</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label><span data-i18n="lighting_label">光照 / 天气</span> <small data-i18n="lighting_small">(不选＝AI 自动判断)</small></label>
+      <div id="presets" class="chips"></div>
+    </div>
+
+    <div class="field">
+      <label><span data-i18n="ref_label">参考图</span> <small data-i18n="ref_small">(模仿它的材质 / 光照 / 氛围)</small></label>
+      <div id="ref-drop" class="dropzone">
+        <span data-i18n="ref_drop">拖入想要的效果图 / 实景照片</span>
+        <input type="file" id="ref-file" accept="image/*" hidden>
+      </div>
+      <div id="ref-preview" class="hidden"><img id="ref-img"><button id="ref-clear" class="ghost small" data-i18n="ref_remove">移除</button></div>
+      <p class="muted tiny" data-i18n="ref_note">放一张你想要的风格的图 —— AI 会照它的材质、光线、时段来渲。</p>
+    </div>
+
+    <div class="field">
+      <label><span data-i18n="prompt_label">提示词补充</span> <small data-i18n="optional">(可选)</small></label>
+      <textarea id="prompt" rows="3" data-i18n-ph="prompt_ph"></textarea>
+    </div>
+
+    <div class="field">
+      <label><span data-i18n="ai_strength">AI 强度</span> <b id="ai-val">25</b> / 100</label>
+      <input type="range" id="ai-strength" min="0" max="100" step="5" value="25">
+      <p class="muted tiny" data-i18n="ai_note">≈30：加配景，几乎不动建筑。≈70：地形/房屋会被改。100：几乎完全重构。</p>
+    </div>
+
+    <div class="field">
+      <label><span data-i18n="geom_label">结构约束</span></label>
+      <p class="muted tiny" data-i18n="geom_note">深度图 + 边线图（真实 3D 数据，不是猜的）永远自动生成，作为 ControlNet 硬约束——这是"AI 强度"能保证不丢物体/不变形的原因，不需要也不能关。</p>
+    </div>
+
+    <div class="field">
+      <label><span data-i18n="seed_label">随机种子</span> <small data-i18n="seed_small">(留空＝随机)</small></label>
+      <input type="number" id="seed" data-i18n-ph="seed_ph" min="1">
+      <label class="check"><input type="checkbox" id="shadows" checked> <span data-i18n="with_shadows">截图带 SketchUp 阴影</span></label>
+    </div>
+
+    <details class="field" id="analysis-box">
+      <summary><span data-i18n="analysis_summary">模型信息分析</span> <button id="analyze-btn" class="ghost small" data-i18n="analyze_btn">分析当前视角</button></summary>
+      <pre id="analysis" data-i18n="analysis_placeholder">点击「分析当前视角」提取材质/构件/尺寸/太阳数据。</pre>
+    </details>
+
+    <button id="render-btn" data-i18n="render_btn">开始渲染</button>
+    <p class="muted tiny" data-i18n="render_note">RealVisXL img2img + 深度/边线双重 ControlNet 硬约束，真实数据锚定结构。约 1–3 分钟。</p>
+  </aside>
+
+</div>
+<script src="i18n.js"></script>
+<script src="dialog.js"></script>
+</body>
+</html>

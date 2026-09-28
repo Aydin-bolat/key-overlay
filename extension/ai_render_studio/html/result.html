@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Render Result</title>
+<link rel="stylesheet" href="result.css">
+</head>
+<body>
+<div id="wrap">
+  <div id="compare">
+    <img id="img-after" alt="">
+    <div id="before-clip"><img id="img-before" alt=""></div>
+    <div id="compare-handle"></div>
+    <div id="label-before" class="compare-label" data-i18n="compare_before">渲染前</div>
+    <div id="label-after" class="compare-label" data-i18n="compare_after">AI 渲染</div>
+  </div>
+  <div id="hint" data-i18n="result_hint">拖动中线滑动对比 · 右键图片 · 保存 / 重新渲染 / AI 调色</div>
+
+  <div id="menu" class="hidden">
+    <button data-act="save" data-i18n="menu_save">本地保存</button>
+    <button data-act="rerender" data-i18n="menu_rerender">重新渲染</button>
+    <button data-act="grade" data-i18n="menu_grade">AI 调色</button>
+    <button data-act="enhance" data-i18n="menu_enhance">上传图片增强真实感</button>
+    <button data-act="folder" data-i18n="menu_folder">打开输出文件夹</button>
+  </div>
+
+  <div id="grade-box" class="hidden">
+    <label data-i18n="grade_label">AI 调色 —— 描述想要的色调 / 氛围</label>
+    <textarea id="grade-text" rows="2" data-i18n-ph="grade_ph"></textarea>
+    <div class="row">
+      <button id="grade-go" class="primary" data-i18n="grade_go">开始调色</button>
+      <button data-act="grade-cancel" class="ghost" data-i18n="grade_cancel">取消</button>
+    </div>
+  </div>
+
+  <div id="enhance-box" class="hidden">
+    <label data-i18n="enhance_title">增强真实感 —— 上传任意渲染软件出的图</label>
+    <div id="enhance-drop" class="dropzone">
+      <span data-i18n="enhance_drop">拖入或点击选择图片（Vray / Corona / Enscape / Lumion / D5 等都可以）</span>
+      <input type="file" id="enhance-file" accept="image/*" hidden>
+    </div>
+    <img id="enhance-preview" class="hidden">
+    <label><span data-i18n="enhance_strength">增强强度</span> <b id="enhance-val">50</b> / 100</label>
+    <input type="range" id="enhance-strength" min="0" max="100" step="5" value="50">
+    <p class="tiny muted" data-i18n="enhance_note">低强度只精修材质微观细节和光影层次；高强度效果更明显，但构图、物体、数量绝不会变。</p>
+    <div class="row">
+      <button id="enhance-go" class="primary" data-i18n="enhance_go">开始增强</button>
+      <button data-act="enhance-cancel" class="ghost" data-i18n="grade_cancel">取消</button>
+    </div>
+  </div>
+
+  <div id="progress" class="hidden">
+    <div id="ring"></div>
+    <div id="progress-note" data-i18n="grading">调色中…</div>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+</div>
+<script src="i18n.js"></script>
+<script src="result.js"></script>
+</body>
+</html>

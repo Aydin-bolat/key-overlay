@@ -1,0 +1,259 @@
+/* AI 渲染工作室 — 界面多语言 (中 / EN / RU / KK)。AI 提示词永远用英文，不在这里。 */
+(function () {
+  'use strict';
+
+  var STR = {
+    zh: {
+      app_title: 'AI 渲染工作室', lang_label: '语言',
+      refresh_view: '⟳ 刷新相机视图',
+      view_hint: '在 SketchUp 里调好角度，然后点这里。暗色部分不参与渲染。',
+      snap_fail_title: '没截到 SketchUp 视图',
+      snap_fail_msg: '点下方「刷新相机视图」重试。渲染仍然可用。',
+      preparing: '准备中…', cancel: '取消', start: '开始…',
+      render_error: '渲染出错', open_log_folder: '打开日志文件夹', close: '关闭',
+      scene_type: '场景类型', exterior: '建筑外观', interior: '室内空间',
+      aspect_ratio: '画面比例', follow_window: '跟随窗口',
+      resolution: '输出清晰度', res_draft: '240p（草稿）', res_2k: '1440p（2K）', res_4k: '2160p（4K）',
+      res_hint: '输出约 {w}×{h} px{tail}', res_hint_upscale: '，含超分放大',
+      time_label: '时间', day: '☀ 白天', night: '🌙 黑夜',
+      lighting_label: '光照 / 天气', lighting_small: '(不选＝AI 自动判断)',
+      ref_label: '参考图', ref_small: '(模仿它的材质 / 光照 / 氛围)',
+      ref_drop: '拖入想要的效果图 / 实景照片', ref_remove: '移除',
+      ref_note: '放一张你想要的风格图 —— AI 分析它的材质、色调、光线来渲你的模型。低 AI 强度时只借用它的材质和光照，不会把它的家具/布局搬过来。放了参考图时「时间/光照」不生效。',
+      prompt_label: '提示词补充', optional: '(可选)',
+      prompt_ph: '例：清水混凝土墙面，落地玻璃幕墙，庭院里有几棵成年松树，地面湿润有反光…',
+      ai_strength: 'AI 强度',
+      ai_note: '0：严格锁死，一个物件都不改，只做材质+光照写实化。≈30：只加室外配景，建筑/家具/布局不动。≈70：立面/地形/细节会被改。100：几乎完全重构。',
+      geom_label: '结构约束',
+      geom_note: '深度图 + 边线图（真实 3D 数据，不是猜的）永远自动生成，作为 ControlNet 硬约束——这是"AI 强度"能保证不丢物体/不变形的原因，不需要也不能关。',
+      seed_label: '随机种子', seed_small: '(留空＝随机)', seed_ph: '随机',
+      with_shadows: '截图带 SketchUp 阴影',
+      analysis_summary: '模型信息分析', analyze_btn: '分析当前视角', analyzing: '分析中…',
+      analysis_placeholder: '点击「分析当前视角」提取材质/构件/尺寸/太阳数据。',
+      render_btn: '开始渲染', render_btn_busy: '渲染中…',
+      render_note: 'RealVisXL img2img + 深度/边线双重 ControlNet 硬约束，真实数据锚定结构，绝不丢物体。约 1–3 分钟。',
+      comfy_checking: '检查 ComfyUI…', comfy_online: 'ComfyUI 已连接',
+      comfy_offline: 'ComfyUI 未运行，请先启动 ComfyUI Desktop',
+      frame_label: '{aspect} · 渲染范围', frame_full: '整幅',
+      preset_midday: '晴天正午', preset_overcast: '多云柔光', preset_golden: '黄金时刻',
+      preset_blue_hour: '蓝调傍晚', preset_morning_mist: '清晨薄雾', preset_rain: '雨天',
+      preset_snow: '雪天', preset_dramatic_sky: '戏剧天空',
+      preset_warm_interior: '暖色氛围灯', preset_facade_flood: '建筑泛光',
+      preset_city_night: '城市夜景', preset_moonlight: '月光冷调', preset_landscape_led: '景观灯光',
+      result_title: 'AI 渲染结果',
+      result_hint: '拖动中线滑动对比 · 右键图片 · 保存 / 重新渲染 / AI 调色',
+      compare_before: '渲染前', compare_after: 'AI 渲染',
+      menu_save: '本地保存', menu_rerender: '重新渲染', menu_grade: 'AI 调色',
+      menu_enhance: '上传图片增强真实感', menu_folder: '打开输出文件夹',
+      grade_label: 'AI 调色 —— 描述想要的色调 / 氛围',
+      grade_ph: '例：更暖、加一点电影感；或 冷色调、提高对比；或 阴天灰调改成金色黄昏',
+      grade_go: '开始调色', grade_cancel: '取消', grading: '调色中…',
+      enhance_title: '增强真实感 —— 上传任意渲染软件出的图',
+      enhance_drop: '拖入或点击选择图片（Vray / Corona / Enscape / Lumion / D5 等都可以）',
+      enhance_strength: '增强强度',
+      enhance_note: '低强度只精修材质微观细节和光影层次；高强度效果更明显，但构图、物体、数量绝不会变。',
+      enhance_go: '开始增强', enhancing: '增强中…',
+      saved_to: '已保存到 {path}', error_prefix: '出错：'
+    },
+
+    en: {
+      app_title: 'AI Render Studio', lang_label: 'Language',
+      refresh_view: '⟳ Refresh camera view',
+      view_hint: 'Set the angle in SketchUp, then click here. Dark areas are outside the render.',
+      snap_fail_title: "Couldn't capture the SketchUp view",
+      snap_fail_msg: "Click 'Refresh camera view' below to retry. Rendering still works.",
+      preparing: 'Preparing…', cancel: 'Cancel', start: 'Starting…',
+      render_error: 'Render error', open_log_folder: 'Open log folder', close: 'Close',
+      scene_type: 'Scene type', exterior: 'Exterior', interior: 'Interior',
+      aspect_ratio: 'Aspect ratio', follow_window: 'Match window',
+      resolution: 'Output resolution', res_draft: '240p (draft)', res_2k: '1440p (2K)', res_4k: '2160p (4K)',
+      res_hint: 'Output ≈ {w}×{h} px{tail}', res_hint_upscale: ', with AI upscale',
+      time_label: 'Time of day', day: '☀ Day', night: '🌙 Night',
+      lighting_label: 'Lighting / weather', lighting_small: '(none = AI decides)',
+      ref_label: 'Reference image', ref_small: '(copy its materials / lighting / mood)',
+      ref_drop: 'Drop the render / photo you want', ref_remove: 'Remove',
+      ref_note: "Add an image in the style you want — the AI reads its materials, colours and light and applies them to your model. At low AI strength it borrows only the palette and lighting, not the reference's furniture or layout. With a reference set, \"Time / lighting\" above is ignored.",
+      prompt_label: 'Extra prompt', optional: '(optional)',
+      prompt_ph: 'e.g. board-formed concrete walls, floor-to-ceiling glazing, mature pines in the courtyard, wet reflective ground…',
+      ai_strength: 'AI strength',
+      ai_note: '0: strict lock — nothing changes, only materials + lighting are made photoreal. ≈30: adds outdoor scenery only, buildings/furniture/layout untouched. ≈70: facades/terrain/details change. 100: near-total reinterpretation.',
+      geom_label: 'Structure constraints',
+      geom_note: 'A depth map and an edge map (real 3D data, not guessed) are always generated automatically as hard ControlNet constraints - this is what lets "AI strength" guarantee nothing is lost or deformed. Not optional, not something you can turn off.',
+      seed_label: 'Seed', seed_small: '(blank = random)', seed_ph: 'random',
+      with_shadows: 'Capture with SketchUp shadows',
+      analysis_summary: 'Model info', analyze_btn: 'Analyze this view', analyzing: 'Analyzing…',
+      analysis_placeholder: "Click 'Analyze this view' to pull materials, components, dimensions and sun data.",
+      render_btn: 'Render', render_btn_busy: 'Rendering…',
+      render_note: 'RealVisXL img2img with dual Depth/Edge ControlNet hard constraints, anchored to real geometry - objects never get lost. About 1–3 min.',
+      comfy_checking: 'Checking ComfyUI…', comfy_online: 'ComfyUI connected',
+      comfy_offline: 'ComfyUI not running — start ComfyUI Desktop first',
+      frame_label: '{aspect} · render area', frame_full: 'full frame',
+      preset_midday: 'Midday sun', preset_overcast: 'Overcast', preset_golden: 'Golden hour',
+      preset_blue_hour: 'Blue hour', preset_morning_mist: 'Morning mist', preset_rain: 'Rain',
+      preset_snow: 'Snow', preset_dramatic_sky: 'Dramatic sky',
+      preset_warm_interior: 'Warm interior glow', preset_facade_flood: 'Facade floodlight',
+      preset_city_night: 'City night', preset_moonlight: 'Moonlight', preset_landscape_led: 'Landscape lighting',
+      result_title: 'AI Render Result',
+      result_hint: 'Drag the middle line to compare · Right-click · Save / Re-render / AI grade',
+      compare_before: 'Before', compare_after: 'AI render',
+      menu_save: 'Save to disk', menu_rerender: 'Re-render', menu_grade: 'AI color grade',
+      menu_enhance: 'Upload image to enhance realism', menu_folder: 'Open output folder',
+      grade_label: 'AI grade — describe the tone / mood you want',
+      grade_ph: 'e.g. warmer, more cinematic; or cool tone, more contrast; or turn overcast grey into golden dusk',
+      grade_go: 'Apply grade', grade_cancel: 'Cancel', grading: 'Grading…',
+      enhance_title: 'Enhance realism — upload a render from any software',
+      enhance_drop: 'Drop or click to choose an image (Vray / Corona / Enscape / Lumion / D5, etc.)',
+      enhance_strength: 'Enhance strength',
+      enhance_note: 'Low strength only refines fine material detail and light/shadow depth; high strength is more visible, but composition, objects and their count never change.',
+      enhance_go: 'Start enhancing', enhancing: 'Enhancing…',
+      saved_to: 'Saved to {path}', error_prefix: 'Error: '
+    },
+
+    ru: {
+      app_title: 'AI Студия рендеринга', lang_label: 'Язык',
+      refresh_view: '⟳ Обновить вид камеры',
+      view_hint: 'Задайте ракурс в SketchUp, затем нажмите здесь. Тёмные области не входят в рендер.',
+      snap_fail_title: 'Не удалось снять вид SketchUp',
+      snap_fail_msg: 'Нажмите «Обновить вид камеры» ниже. Рендеринг всё равно работает.',
+      preparing: 'Подготовка…', cancel: 'Отмена', start: 'Запуск…',
+      render_error: 'Ошибка рендеринга', open_log_folder: 'Открыть папку логов', close: 'Закрыть',
+      scene_type: 'Тип сцены', exterior: 'Экстерьер', interior: 'Интерьер',
+      aspect_ratio: 'Соотношение сторон', follow_window: 'Как окно',
+      resolution: 'Разрешение вывода', res_draft: '240p (черновик)', res_2k: '1440p (2K)', res_4k: '2160p (4K)',
+      res_hint: 'Вывод ≈ {w}×{h} px{tail}', res_hint_upscale: ', с AI-апскейлом',
+      time_label: 'Время суток', day: '☀ День', night: '🌙 Ночь',
+      lighting_label: 'Освещение / погода', lighting_small: '(не выбрано = AI решает)',
+      ref_label: 'Референс', ref_small: '(копировать материалы / свет / настроение)',
+      ref_drop: 'Перетащите нужный рендер / фото', ref_remove: 'Удалить',
+      ref_note: 'Добавьте изображение в нужном стиле — AI считывает его материалы, цвета и свет и применяет к вашей модели. При низкой силе AI берётся только палитра и освещение, без мебели и планировки референса. При заданном референсе «Время / освещение» выше игнорируется.',
+      prompt_label: 'Доп. описание', optional: '(необязательно)',
+      prompt_ph: 'напр.: бетонные стены, панорамное остекление, взрослые сосны во дворе, влажная блестящая земля…',
+      ai_strength: 'Сила AI',
+      ai_note: '0: строгая фиксация — ничего не меняется, только материалы и свет становятся фотореалистичными. ≈30: добавляется только внешнее окружение, здания/мебель/планировка без изменений. ≈70: меняются фасады/рельеф/детали. 100: почти полная переинтерпретация.',
+      geom_label: 'Структурные ограничения',
+      geom_note: 'Карта глубины и карта рёбер (реальные 3D-данные, не догадки) всегда создаются автоматически как жёсткие ограничения ControlNet — именно поэтому "сила AI" гарантирует, что ничего не потеряется и не деформируется. Не опционально, отключить нельзя.',
+      seed_label: 'Сид', seed_small: '(пусто = случайно)', seed_ph: 'случайно',
+      with_shadows: 'Снимок с тенями SketchUp',
+      analysis_summary: 'Инфо о модели', analyze_btn: 'Анализ вида', analyzing: 'Анализ…',
+      analysis_placeholder: 'Нажмите «Анализ вида», чтобы извлечь материалы, элементы, размеры и данные о солнце.',
+      render_btn: 'Рендер', render_btn_busy: 'Рендеринг…',
+      render_note: 'RealVisXL img2img с двойным жёстким ограничением ControlNet (глубина/рёбра), привязанным к реальной геометрии — объекты никогда не теряются. Около 1–3 мин.',
+      comfy_checking: 'Проверка ComfyUI…', comfy_online: 'ComfyUI подключён',
+      comfy_offline: 'ComfyUI не запущен — сначала запустите ComfyUI Desktop',
+      frame_label: '{aspect} · область рендера', frame_full: 'весь кадр',
+      preset_midday: 'Полдень', preset_overcast: 'Пасмурно', preset_golden: 'Золотой час',
+      preset_blue_hour: 'Синий час', preset_morning_mist: 'Утренний туман', preset_rain: 'Дождь',
+      preset_snow: 'Снег', preset_dramatic_sky: 'Драматичное небо',
+      preset_warm_interior: 'Тёплый интерьер', preset_facade_flood: 'Подсветка фасада',
+      preset_city_night: 'Городская ночь', preset_moonlight: 'Лунный свет', preset_landscape_led: 'Ландшафтный свет',
+      result_title: 'Результат рендеринга',
+      result_hint: 'Потяните среднюю линию для сравнения · ПКМ · Сохранить / Перерендер / AI-цвет',
+      compare_before: 'До', compare_after: 'AI-рендер',
+      menu_save: 'Сохранить на диск', menu_rerender: 'Перерендерить', menu_grade: 'AI-цветокоррекция',
+      menu_enhance: 'Загрузить изображение для усиления реализма', menu_folder: 'Открыть папку вывода',
+      grade_label: 'AI-цвет — опишите нужный тон / настроение',
+      grade_ph: 'напр.: теплее, кинематографичнее; или холодный тон, больше контраста; или из пасмурного серого в золотой закат',
+      grade_go: 'Применить', grade_cancel: 'Отмена', grading: 'Цветокоррекция…',
+      enhance_title: 'Усиление реализма — загрузите рендер из любого софта',
+      enhance_drop: 'Перетащите или выберите изображение (Vray / Corona / Enscape / Lumion / D5 и т.д.)',
+      enhance_strength: 'Сила усиления',
+      enhance_note: 'При низкой силе дорабатываются только мелкие детали материалов и светотень; при высокой эффект заметнее, но композиция, объекты и их количество не меняются никогда.',
+      enhance_go: 'Начать усиление', enhancing: 'Усиление…',
+      saved_to: 'Сохранено в {path}', error_prefix: 'Ошибка: '
+    },
+
+    kk: {
+      app_title: 'AI Рендер студиясы', lang_label: 'Тіл',
+      refresh_view: '⟳ Камера көрінісін жаңарту',
+      view_hint: 'SketchUp-те бұрышты реттеп, осында басыңыз. Күңгірт аймақтар рендерге кірмейді.',
+      snap_fail_title: 'SketchUp көрінісін түсіру мүмкін болмады',
+      snap_fail_msg: 'Төмендегі «Камера көрінісін жаңарту» түймесін басыңыз. Рендеринг әлі де жұмыс істейді.',
+      preparing: 'Дайындалуда…', cancel: 'Болдырмау', start: 'Іске қосылуда…',
+      render_error: 'Рендеринг қатесі', open_log_folder: 'Журнал қалтасын ашу', close: 'Жабу',
+      scene_type: 'Сахна түрі', exterior: 'Сыртқы көрініс', interior: 'Ішкі кеңістік',
+      aspect_ratio: 'Кадр пропорциясы', follow_window: 'Терезе бойынша',
+      resolution: 'Шығыс ажыратымдылығы', res_draft: '240p (жоба)', res_2k: '1440p (2K)', res_4k: '2160p (4K)',
+      res_hint: 'Шығыс ≈ {w}×{h} px{tail}', res_hint_upscale: ', AI үлкейтуімен',
+      time_label: 'Тәулік уақыты', day: '☀ Күндіз', night: '🌙 Түн',
+      lighting_label: 'Жарық / ауа райы', lighting_small: '(таңдалмаса = AI шешеді)',
+      ref_label: 'Үлгі сурет', ref_small: '(материал / жарық / көңіл-күйін көшіру)',
+      ref_drop: 'Қалаған рендер / фотоны сүйреңіз', ref_remove: 'Жою',
+      ref_note: 'Қалаған стильдегі суретті қосыңыз — AI оның материалдары мен жарығын оқып, сіздің моделіңізге қолданады. AI күші төмен болғанда тек палитра мен жарық алынады, үлгінің жиһазы мен жоспары емес. Үлгі берілсе, жоғарыдағы «Уақыт / жарық» ескерілмейді.',
+      prompt_label: 'Қосымша сипаттама', optional: '(міндетті емес)',
+      prompt_ph: 'мыс.: құйма бетон қабырғалар, еденнен төбеге дейін шыны, ауладағы қарағайлар, ылғал жылтыр жер…',
+      ai_strength: 'AI күші',
+      ai_note: '0: қатаң бекіту — ештеңе өзгермейді, тек материалдар мен жарық фотошынайы болады. ≈30: тек сыртқы ортаны қосады, ғимараттар/жиһаз/жоспар өзгермейді. ≈70: қасбеттер/жер бедері/бөлшектер өзгереді. 100: толықтай қайта түсіндіру.',
+      geom_label: 'Құрылымдық шектеулер',
+      geom_note: 'Тереңдік картасы мен контур картасы (нақты 3D деректер, болжам емес) әрқашан автоматты түрде жасалады да, ControlNet-тің қатаң шектеуі ретінде қолданылады — "AI күші" ешнәрсенің жоғалмайтынына/деформацияланбайтынына дәл осылай кепілдік береді. Бұл міндетті, өшіру мүмкін емес.',
+      seed_label: 'Сид', seed_small: '(бос = кездейсоқ)', seed_ph: 'кездейсоқ',
+      with_shadows: 'SketchUp көлеңкелерімен түсіру',
+      analysis_summary: 'Модель туралы ақпарат', analyze_btn: 'Көріністі талдау', analyzing: 'Талдау…',
+      analysis_placeholder: 'Материалдарды, элементтерді, өлшемдерді және күн деректерін алу үшін «Көріністі талдау» түймесін басыңыз.',
+      render_btn: 'Рендер', render_btn_busy: 'Рендеринг…',
+      render_note: 'Нақты геометрияға негізделген қос ControlNet (тереңдік/контур) қатаң шектеуімен RealVisXL img2img — нысандар ешқашан жоғалмайды. Шамамен 1–3 мин.',
+      comfy_checking: 'ComfyUI тексерілуде…', comfy_online: 'ComfyUI қосылды',
+      comfy_offline: 'ComfyUI іске қосылмаған — алдымен ComfyUI Desktop-ты іске қосыңыз',
+      frame_label: '{aspect} · рендер аймағы', frame_full: 'толық кадр',
+      preset_midday: 'Түскі күн', preset_overcast: 'Бұлыңғыр', preset_golden: 'Алтын сағат',
+      preset_blue_hour: 'Көк сағат', preset_morning_mist: 'Таңғы тұман', preset_rain: 'Жаңбыр',
+      preset_snow: 'Қар', preset_dramatic_sky: 'Драмалық аспан',
+      preset_warm_interior: 'Жылы ішкі жарық', preset_facade_flood: 'Қасбет жарығы',
+      preset_city_night: 'Қала түні', preset_moonlight: 'Ай жарығы', preset_landscape_led: 'Ландшафт жарығы',
+      result_title: 'Рендеринг нәтижесі',
+      result_hint: 'Салыстыру үшін ортаңғы сызықты сүйреңіз · Оң жақ · Сақтау / Қайта рендер / AI-түс',
+      compare_before: 'Дейін', compare_after: 'AI рендер',
+      menu_save: 'Дискіге сақтау', menu_rerender: 'Қайта рендер', menu_grade: 'AI-түс түзету',
+      menu_enhance: 'Шынайылықты күшейту үшін сурет жүктеу', menu_folder: 'Шығыс қалтасын ашу',
+      grade_label: 'AI-түс — қалаған реңк / көңіл-күйді сипаттаңыз',
+      grade_ph: 'мыс.: жылырақ, кинематографиялық; немесе салқын реңк, көбірек контраст; немесе бұлыңғыр сұрдан алтын кешке',
+      grade_go: 'Қолдану', grade_cancel: 'Болдырмау', grading: 'Түс түзету…',
+      enhance_title: 'Шынайылықты күшейту — кез келген бағдарламадан рендер жүктеңіз',
+      enhance_drop: 'Суретті сүйреңіз немесе таңдаңыз (Vray / Corona / Enscape / Lumion / D5 және т.б.)',
+      enhance_strength: 'Күшейту деңгейі',
+      enhance_note: 'Төмен деңгейде тек материалдың нәзік бөлшектері мен жарық-көлеңке тереңдігі жетілдіріледі; жоғары деңгейде әсер айқынырақ, бірақ композиция, нысандар және олардың саны ешқашан өзгермейді.',
+      enhance_go: 'Күшейтуді бастау', enhancing: 'Күшейтілуде…',
+      saved_to: '{path} ішіне сақталды', error_prefix: 'Қате: '
+    }
+  };
+
+  var LANGS = [
+    { code: 'zh', name: '中文' },
+    { code: 'en', name: 'English' },
+    { code: 'ru', name: 'Русский' },
+    { code: 'kk', name: 'Қазақша' }
+  ];
+
+  function read() { try { return localStorage.getItem('ars_lang'); } catch (e) { return null; } }
+
+  window.ARSi18n = {
+    lang: read() || 'zh',
+    langs: LANGS,
+    t: function (key, vars) {
+      var s = (STR[this.lang] && STR[this.lang][key]);
+      if (s == null) s = STR.zh[key];
+      if (s == null) return key;
+      if (vars) {
+        Object.keys(vars).forEach(function (k) { s = s.split('{' + k + '}').join(vars[k]); });
+      }
+      return s;
+    },
+    apply: function (root) {
+      var r = root || document;
+      Array.prototype.forEach.call(r.querySelectorAll('[data-i18n]'), function (el) {
+        el.textContent = window.ARSi18n.t(el.getAttribute('data-i18n'));
+      });
+      Array.prototype.forEach.call(r.querySelectorAll('[data-i18n-ph]'), function (el) {
+        el.setAttribute('placeholder', window.ARSi18n.t(el.getAttribute('data-i18n-ph')));
+      });
+      Array.prototype.forEach.call(r.querySelectorAll('[data-i18n-title]'), function (el) {
+        el.setAttribute('title', window.ARSi18n.t(el.getAttribute('data-i18n-title')));
+      });
+      document.documentElement.lang = this.lang;
+    },
+    set: function (lang) {
+      this.lang = lang;
+      try { localStorage.setItem('ars_lang', lang); } catch (e) {}
+      this.apply();
+    }
+  };
+})();
