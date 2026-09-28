@@ -28,9 +28,7 @@ module AydinCreative
         nil
       end
 
-      # aspect 可以是 '16:9' 这类名字、'window'，或者直接一个数值比例(云端引擎吸附后的比例)
       def aspect_value(view, aspect)
-        return aspect.to_f if aspect.is_a?(Numeric) && aspect.to_f.positive?
         return ASPECTS[aspect] if ASPECTS.key?(aspect)
         vw = view.vpwidth.to_f
         vh = view.vpheight.to_f

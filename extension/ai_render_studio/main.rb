@@ -8,8 +8,7 @@ require File.join(__dir__, 'model_extractor')
 require File.join(__dir__, 'capture')
 require File.join(__dir__, 'comfy_client')
 require File.join(__dir__, 'workflow_builder')
-require File.join(__dir__, 'cloud_client')
-require File.join(__dir__, 'cloud_prompt')
+require File.join(__dir__, 'photo_builder')
 require File.join(__dir__, 'geometry_check')
 
 module AydinCreative
@@ -37,13 +36,13 @@ module AydinCreative
     STAGE2_REFINE_STRENGTH = 100 # build_enhance 的强度(不暴露给用户)，映射到它的 denoise 上限 0.45——参考真实发布过的 archviz ComfyUI 工作流"材质精修遍"用的就是这个档位（0.30 那档是给"外部图/没有 ControlNet 兜底"场景留的保守值，这里结构已经在第一阶段被 ControlNet 锁死了，可以给够材质自由度）
     @last_opts = {}          # 上次渲染设置，供"重新渲染"用
     @last_result = nil       # { local:, comfy_path:, filename: }
-    @cloud_job = nil         # 云端渲染任务状态（多次尝试 + 结构吻合度择优），见 on_render_cloud
+    @job = nil               # Z-Image 管线的多次尝试/择优/放大状态，见 on_render_zimage
     @last_source_path = nil  # 当前结果对应的"渲染前"图（SketchUp 结构图，或"增强真实感"里用户上传的原图）——给结果窗口的滑动对比条用
 
     # ---- Ruby 侧界面文字（菜单 / 弹窗 / 保存对话框 / 错误）------------
     STRINGS = {
       'zh' => {
-        s_cloud: '%s 渲染中（第 %d/%d 次）…', s_retry: '结构吻合度只有 %d%%，自动重出一张…',
+        s_probe: '检查本地模型…', s_attempt: 'Z-Image 照片级出图（第 %d/%d 张）…', s_retry: '结构吻合度 %d%%，换种子重出…', s_upscale: 'SeedVR2 精修放大到目标分辨率…', s_resize: '放大到目标分辨率（未安装 SeedVR2）…',
         s_extract: '提取模型信息…（大模型可能要几秒）', s_capture: '截取当前视角…', s_connect: '连接 ComfyUI…', s_upload: '上传结构图…', s_upref: '上传参考图…', s_build: '生成工作流…', s_submit: '提交到 ComfyUI…', s_detail: '细节锁：补回线脚/绗缝等细节…', s_processing: 'ComfyUI 处理中',
         menu_open: '打开渲染面板', menu_reload: '重新加载插件（开发）', menu_log: '打开日志文件夹',
         cmd_name: 'AI 渲染', cmd_tip: 'AI 渲染工作室',
@@ -55,7 +54,7 @@ module AydinCreative
         err_seealso: '（%s）— 详见 render.log', save_fail: '保存失败：'
       },
       'en' => {
-        s_cloud: '%s rendering (attempt %d/%d)…', s_retry: 'Structure match only %d%%, re-rendering…',
+        s_probe: 'Checking local models…', s_attempt: 'Z-Image photoreal pass (%d/%d)…', s_retry: 'Structure match %d%%, re-rendering with a new seed…', s_upscale: 'SeedVR2 detail upscale…', s_resize: 'Resizing to target (SeedVR2 not installed)…',
         s_extract: 'Reading model info… (a few seconds on big models)', s_capture: 'Capturing the view…', s_connect: 'Connecting to ComfyUI…', s_upload: 'Uploading structure image…', s_upref: 'Uploading reference image…', s_build: 'Building workflow…', s_submit: 'Submitting to ComfyUI…', s_detail: 'Detail lock: restoring mouldings and seams…', s_processing: 'ComfyUI is working',
         menu_open: 'Open render panel', menu_reload: 'Reload plugin (dev)', menu_log: 'Open log folder',
         cmd_name: 'AI Render', cmd_tip: 'AI Render Studio',
@@ -67,7 +66,7 @@ module AydinCreative
         err_seealso: '(%s) — see render.log', save_fail: 'Save failed: '
       },
       'ru' => {
-        s_cloud: '%s рендерит (попытка %d/%d)…', s_retry: 'Совпадение структуры %d%%, повторный рендер…',
+        s_probe: 'Проверка локальных моделей…', s_attempt: 'Z-Image фотореализм (%d/%d)…', s_retry: 'Совпадение структуры %d%%, повтор с новым seed…', s_upscale: 'SeedVR2 апскейл деталей…', s_resize: 'Масштабирование (SeedVR2 не установлен)…',
         s_extract: 'Чтение данных модели… (несколько секунд для больших)', s_capture: 'Снимок вида…', s_connect: 'Подключение к ComfyUI…', s_upload: 'Загрузка структурного изображения…', s_upref: 'Загрузка референса…', s_build: 'Сборка воркфлоу…', s_submit: 'Отправка в ComfyUI…', s_detail: 'Фиксация деталей: восстановление профилей и швов…', s_processing: 'ComfyUI обрабатывает',
         menu_open: 'Открыть панель рендеринга', menu_reload: 'Перезагрузить плагин (разр.)', menu_log: 'Открыть папку логов',
         cmd_name: 'AI Рендер', cmd_tip: 'AI Студия рендеринга',
@@ -79,7 +78,7 @@ module AydinCreative
         err_seealso: '(%s) — см. render.log', save_fail: 'Ошибка сохранения: '
       },
       'kk' => {
-        s_cloud: '%s рендерлеуде (%d/%d әрекет)…', s_retry: 'Құрылым сәйкестігі %d%%, қайта рендер…',
+        s_probe: 'Жергілікті модельдерді тексеру…', s_attempt: 'Z-Image фотошынайы рендер (%d/%d)…', s_retry: 'Құрылым сәйкестігі %d%%, жаңа seed-пен қайта…', s_upscale: 'SeedVR2 бөлшектерді үлкейту…', s_resize: 'Мақсатты өлшемге үлкейту (SeedVR2 жоқ)…',
         s_extract: 'Модель ақпаратын оқу… (үлкен модельдерде бірнеше секунд)', s_capture: 'Көріністі түсіру…', s_connect: 'ComfyUI-ге қосылу…', s_upload: 'Құрылым суретін жүктеу…', s_upref: 'Үлгі суретті жүктеу…', s_build: 'Воркфлоу құру…', s_submit: 'ComfyUI-ге жіберу…', s_detail: 'Бөлшек бекіту: профильдер мен тігістерді қалпына келтіру…', s_processing: 'ComfyUI жұмыс істеуде',
         menu_open: 'Рендер панелін ашу', menu_reload: 'Плагинді қайта жүктеу (әзірлеу)', menu_log: 'Журнал қалтасын ашу',
         cmd_name: 'AI Рендер', cmd_tip: 'AI Рендер студиясы',
@@ -101,59 +100,39 @@ module AydinCreative
       args.empty? ? s : format(s, *args)
     end
 
-    # ================= 渲染引擎设置 =================
-    # engine: 'gemini'(Nano Banana Pro，默认) | 'seedream'(字节/火山方舟) | 'local'(本地 ComfyUI RealVisXL)
-    # Key 存在 SketchUp 自己的偏好设置里(Windows 注册表，跟本机用户绑定)，不写进插件目录，
-    # 面板上只显示末 4 位。
+    # ================= 引擎设置 =================
+    # engine: 'zimage'(默认，Z-Image Turbo + ControlNet + SeedVR2) | 'sdxl'(旧的 RealVisXL 管线)
     SETTINGS_SECTION = 'ars_render_studio'
-    SETTING_KEYS = %w[engine gemini_key gemini_model seedream_key seedream_model proxy auto_retry].freeze
-    SECRET_KEYS = %w[gemini_key seedream_key].freeze
-    CLOUD_ENGINES = %w[gemini seedream].freeze
-    CLOUD_MAX_ATTEMPTS = 3        # 开了"自动择优"时，一次渲染最多出几张
-    GEOMETRY_PASS_SCORE = 0.50    # 结构吻合度低于这个就自动重出（合成测试：对齐≈0.95+，错位/丢物体≈0.3-0.4；真实照片还没校准过，先取保守值，分数都写在 render.log 里）
+    ENGINES = %w[zimage sdxl].freeze
+    MAX_ATTEMPTS = 3            # 开"自动择优"时一次渲染最多出几张（本地出图不花钱，只花时间）
+    GEOMETRY_PASS_SCORE = 0.55  # 结构吻合度低于这个就换种子重出（合成测试：对齐≈0.95，错位/丢物体≈0.3-0.4）
 
     def load_settings
-      h = {}
-      SETTING_KEYS.each { |k| h[k.to_sym] = (Sketchup.read_default(SETTINGS_SECTION, "cfg_#{k}", nil) rescue nil) }
-      h[:engine] = 'gemini' if h[:engine].to_s.empty?
-      h[:auto_retry] = h[:auto_retry].nil? ? true : (h[:auto_retry] == true || h[:auto_retry].to_s == 'true')
-      h
+      engine = (Sketchup.read_default(SETTINGS_SECTION, 'cfg_engine', 'zimage') rescue 'zimage').to_s
+      retry_v = (Sketchup.read_default(SETTINGS_SECTION, 'cfg_auto_retry', true) rescue true)
+      { engine: ENGINES.include?(engine) ? engine : 'zimage', auto_retry: retry_v == true || retry_v.to_s == 'true' }
     end
 
-    def settings_for_js
-      s = load_settings
-      out = {}
-      SETTING_KEYS.each do |k|
-        v = s[k.to_sym]
-        if SECRET_KEYS.include?(k)
-          out["#{k}_set".to_sym] = !v.to_s.strip.empty?
-          out["#{k}_tail".to_sym] = v.to_s.strip.empty? ? '' : v.to_s.strip[-4..]
-        else
-          out[k.to_sym] = v
-        end
-      end
-      out
-    end
-
-    # 网页传回来的 JSON：密钥字段为空字符串 = 不修改（面板里不回显完整 Key）
     def save_settings(json)
       data = JSON.parse(json.to_s)
-      SETTING_KEYS.each do |k|
-        next unless data.key?(k)
-        v = data[k]
-        next if SECRET_KEYS.include?(k) && v.to_s.strip.empty? && !data["#{k}_clear"]
-        v = v.to_s.strip unless v == true || v == false
-        Sketchup.write_default(SETTINGS_SECTION, "cfg_#{k}", v)
-      end
-      rlog "settings saved: engine=#{load_settings[:engine]}"
-      to_js('settings', settings_for_js)
+      Sketchup.write_default(SETTINGS_SECTION, 'cfg_engine', data['engine'].to_s) if ENGINES.include?(data['engine'].to_s)
+      Sketchup.write_default(SETTINGS_SECTION, 'cfg_auto_retry', data['auto_retry'] ? true : false) if data.key?('auto_retry')
+      rlog "settings saved: #{load_settings}"
+      to_js('settings', load_settings)
+      push_model_status
     rescue StandardError => e
       rlog "save_settings ERROR: #{e.class}: #{e.message}"
-      to_js('renderError', { message: "保存设置失败：#{e.message}" })
     end
 
-    def cloud_engine?(settings = load_settings)
-      CLOUD_ENGINES.include?(settings[:engine].to_s)
+    # 告诉面板：Z-Image 管线需要的模型齐不齐、缺什么、SeedVR2 有没有
+    def push_model_status
+      client = ComfyClient.new
+      return unless client.online?
+      r = PhotoBuilder.resolve(client)
+      rlog "  models ok=#{r[:ok]} seedvr=#{!r[:seedvr].nil?} #{r[:models]}"
+      to_js('models', { ok: r[:ok], missing: r[:missing], seedvr: !r[:seedvr].nil?, seedvr_hint: PhotoBuilder.seedvr_hint })
+    rescue StandardError => e
+      rlog "push_model_status ERROR: #{e.class}: #{e.message}"
     end
 
     # ================= 主面板 =================
@@ -202,14 +181,15 @@ module AydinCreative
       presets = Presets.all
       rlog "  presets day=#{presets[:day].size} night=#{presets[:night].size}"
       to_js('init', { presets: presets, comfy: { online: online, base: client.base }, aspect: @aspect,
-                      settings: settings_for_js })
+                      settings: load_settings })
+      UI.start_timer(0.8, false) { push_model_status } if online
       rlog '  init sent to dialog'
       UI.start_timer(0.35, false) { push_snapshot }   # 自动截一次当前相机视图
       start_view_watch   # 面板开着期间持续跟着相机刷新取景框预览，防止预览和实际渲染对不上
       # ComfyUI 没连上就每 4 秒自动重查一次，用户开着面板去启动 ComfyUI 也不用手动刷新
       unless online
         start_comfy_watch
-        auto_launch_comfy unless cloud_engine?
+        auto_launch_comfy
       end
     rescue StandardError => e
       rlog "on_ready ERROR: #{e.class}: #{e.message}\n#{Array(e.backtrace).first(10).join("\n")}"
@@ -221,7 +201,10 @@ module AydinCreative
       online = client.online?
       rlog "recheck comfy: online=#{online}"
       to_js('comfy', { online: online, base: client.base })
-      stop_comfy_watch if online
+      if online
+        stop_comfy_watch
+        push_model_status
+      end
     rescue StandardError => e
       rlog "push_comfy_status ERROR: #{e.class}: #{e.message}"
     end
@@ -364,14 +347,14 @@ module AydinCreative
       begin
         opts = JSON.parse(json, symbolize_names: true)
         @last_opts = opts
-        @cloud_job = nil
+        @job = nil
         v = view
         strength = (opts[:ai_strength].nil? ? 25 : opts[:ai_strength].to_i)
         strength = 0 if strength < 0
         strength = 100 if strength > 100
         settings = load_settings
         rlog "opts: engine=#{settings[:engine]} aspect=#{@aspect} res=#{opts[:resolution]} ai=#{strength} kind=#{opts[:kind]} preset=#{opts[:preset_key]}"
-        return on_render_cloud(opts, v, strength, settings) if cloud_engine?(settings)
+        return on_render_zimage(opts, v, strength, settings) if settings[:engine] == 'zimage'
 
         ctx = step(tr(:s_extract), 0.04) { ModelExtractor.extract(v) }
         rlog "  rays_hit=#{ctx[:rays_hit]}  mats=#{(ctx[:visible_materials] || []).size}"
@@ -437,8 +420,8 @@ module AydinCreative
         # 两阶段：结构锁定(ControlNet，上面已提交) → 精修(build_enhance，无 ControlNet，
         # 专心把材质画细 + 顺便放大到目标分辨率)。拆成两遍是实测出来的：一遍到位既要锁死
         # 结构又要出好材质，实测容易画糊/画花；分两遍各司其职效果明显更好。
-        # 第二阶段也带上深度/边线 ControlNet(强度减半)：以前这一遍完全不带约束、denoise 0.45，
-        # 正是"第一遍锁住的结构，第二遍又被画走样"的原因。
+        # 第二阶段也带上深度/边线 ControlNet：以前这一遍完全不带约束、denoise 0.45，
+        # 正是"第一遍锁住的结构，第二遍又被画走样"的原因之一。
         run_pipeline(pid, phase: 'render', detail: {
           strength: STAGE2_REFINE_STRENGTH,
           resolution: opts[:resolution],
@@ -452,148 +435,134 @@ module AydinCreative
       end
     end
 
-    # ================= 云端渲染（Nano Banana Pro / Seedream）=================
-    # 流程：SU 截图(关边线、开材质) + SU 线稿 + 可选参考图 → 多模态图像模型"只换材质光照" →
-    # 用线稿做结构吻合度打分 → 分数低就自动重出，最多 CLOUD_MAX_ATTEMPTS 次，留最高分那张。
-    # 画面比例吸附到云端支持的最接近比例，并且按这个比例截图——保证截图、线稿、成品三者同一比例，
-    # 结构检查才对得上。
-    def on_render_cloud(opts, v, strength, settings)
-      client = Cloud.build_client(settings)
-      ctx = step(tr(:s_extract), 0.04) { ModelExtractor.extract(v) }
-      rlog "  cloud=#{client.label} rays_hit=#{ctx[:rays_hit]} mats=#{(ctx[:visible_materials] || []).size}"
+    # ================= Z-Image 照片级管线 =================
+    # 1. Z-Image Turbo + ControlNet(SketchUp 真实边线) + img2img(SketchUp 截图) 出一张
+    # 2. GeometryCheck 拿线稿给它打"结构吻合度"，低于阈值就换种子重出，最多 MAX_ATTEMPTS 张
+    # 3. 最高分那张交给 SeedVR2 精修放大到目标分辨率（没装 SeedVR2 就普通放大）
+    # 每一步都是 ComfyUI 里一个独立任务：等待在后台线程，打分/决定下一步在主线程(轮询定时器)里。
+    def on_render_zimage(opts, v, strength, settings)
+      client = ComfyClient.new
+      step(tr(:s_connect), 0.03) { raise tr(:err_comfy, client.base) unless client.online? }
+      res = step(tr(:s_probe), 0.04) { PhotoBuilder.resolve(client) }
+      unless res[:ok]
+        raise "Z-Image 管线还缺东西（按下面补齐后重启 ComfyUI 再试；或在面板里把引擎切回 RealVisXL）：\n\n" +
+              res[:missing].join("\n")
+      end
+      rlog "  models #{res[:models]} seedvr=#{res[:seedvr] || 'none'}"
 
-      ratio_name, ratio = Cloud.snap_ratio(Capture.aspect_value(v, @aspect))
+      ctx = step(tr(:s_extract), 0.06) { ModelExtractor.extract(v) }
       stamp = Time.now.strftime('%Y%m%d_%H%M%S')
       src = File.join(WORK_DIR, "source_#{stamp}.png")
-      cap = step(tr(:s_capture), 0.08) { Capture.textured(v, src, shadows: opts[:shadows], aspect: ratio) }
-      rlog "  src #{File.size(src)} bytes #{cap[:w]}x#{cap[:h]} ratio=#{ratio_name}"
+      cap = step(tr(:s_capture), 0.08) { Capture.textured(v, src, shadows: opts[:shadows], aspect: @aspect) }
+      rlog "  src #{File.size(src)} bytes #{cap[:w]}x#{cap[:h]}"
       @last_source_path = src
-
       lines_path = File.join(WORK_DIR, "lines_#{stamp}.png")
-      lin = (Capture.lines(v, lines_path, aspect: ratio) rescue nil)
-      rlog "  lines #{lin ? "#{File.size(lines_path)}b" : 'skipped'}"
+      lin = Capture.lines(v, lines_path, aspect: @aspect)
+      raise '边线图生成失败——Z-Image 管线靠它锁结构，详见 render.log' unless lin
 
-      ref_path = nil
-      if opts[:ref_data_uri].to_s.start_with?('data:image')
-        ref_path = write_data_uri(opts[:ref_data_uri], File.join(WORK_DIR, "ref_#{stamp}"))
+      input_name, lines_name = step(tr(:s_upload), 0.10) { [client.stage_input(src), client.stage_input(lines_path)] }
+      vlm = client.node?('TextGenerate') && client.models('text_encoders').include?(WorkflowBuilder::VISION_CLIP) ? WorkflowBuilder::VISION_CLIP : nil
+      ref_name = nil
+      if vlm && opts[:ref_data_uri].to_s.start_with?('data:image')
+        ref_path = File.join(WORK_DIR, "ref_#{stamp}.png")
+        File.binwrite(ref_path, opts[:ref_data_uri].sub(%r{\Adata:image/[^;]+;base64,}, '').unpack1('m'))
+        ref_name = client.stage_input(ref_path)
       end
-
-      images = [{ path: src, mime: Cloud.mime_for(src) }]
-      images << { path: lines_path, mime: 'image/png' } if lin
-      images << { path: ref_path, mime: Cloud.mime_for(ref_path) } if ref_path
-
       preset_text = opts[:preset_key].to_s.empty? ? nil : Presets.text_for(opts[:mode], opts[:preset_key])
-      @cloud_job = {
-        client: client,
-        images: images,
-        prompt_args: {
-          kind: opts[:kind] || 'exterior', ctx: ctx, preset: preset_text, user_prompt: opts[:user_prompt],
-          strength: strength, has_lines: !lin.nil?, has_reference: !ref_path.nil?
-        },
-        aspect: ratio_name,
-        tier: Cloud.size_tier(opts[:resolution]),
-        pixel: seedream_pixels(ratio, opts[:resolution]),
-        lines_path: lin ? lines_path : nil,
-        seed: opts[:seed],
-        attempts: 0,
-        max_attempts: settings[:auto_retry] ? CLOUD_MAX_ATTEMPTS : 1,
-        best: nil
+      kind = opts[:kind] || 'exterior'
+      prompt = PhotoBuilder.prompt(kind: kind, ctx: ctx, preset: preset_text, user_prompt: opts[:user_prompt])
+      File.write(File.join(WORK_DIR, 'last_prompt.txt'), prompt) rescue nil
+      w, h = PhotoBuilder.output_dims(Capture.aspect_value(v, @aspect), opts[:resolution])
+      rlog "  vlm=#{vlm || 'off'} ref=#{ref_name || 'none'} target=#{w}x#{h} prompt=#{prompt.size}ch"
+
+      @job = {
+        stage: :attempt, attempts: 0, max: settings[:auto_retry] ? MAX_ATTEMPTS : 1, best: nil,
+        lines_path: lines_path, user_seed: opts[:seed], seedvr: res[:seedvr], w: w, h: h,
+        build: lambda do |seed, tag|
+          PhotoBuilder.build_structure(input_filename: input_name, lines_filename: lines_name, models: res[:models],
+                                       prompt: prompt, strength: strength, seed: seed, tag: tag, vlm_model: vlm, kind: kind,
+                                       reference_filename: ref_name)
+        end
       }
-      start_cloud_attempt
+      start_zimage_attempt
     end
 
-    def start_cloud_attempt
-      job = @cloud_job
+    def start_zimage_attempt
+      job = @job
       job[:attempts] += 1
-      prompt = CloudPrompt.render_prompt(**job[:prompt_args], retry_note: job[:attempts] > 1)
-      File.write(File.join(WORK_DIR, 'last_cloud_prompt.txt'), prompt) rescue nil
-      rlog "  cloud attempt #{job[:attempts]}/#{job[:max_attempts]} aspect=#{job[:aspect]} tier=#{job[:tier]} prompt=#{prompt.size}ch"
-      seed = job[:attempts] == 1 ? job[:seed] : nil
-      note = format(tr(:s_cloud), job[:client].label, job[:attempts], job[:max_attempts])
-      run_cloud(phase: 'render', note: note) do
-        job[:client].render(prompt: prompt, images: job[:images], aspect: job[:aspect],
-                            size_tier: job[:tier], pixel_size: job[:pixel], seed: seed)
+      n = job[:attempts]
+      seed = n == 1 && job[:user_seed].to_i.positive? ? job[:user_seed].to_i : rand(1..2_147_483_646)
+      graph = job[:build].call(seed, "a#{n}")
+      File.write(File.join(WORK_DIR, 'last_graph.json'), JSON.pretty_generate(graph)) rescue nil
+      pid = ComfyClient.new.queue(graph)
+      rlog "  attempt #{n}/#{job[:max]} queued #{pid} seed=#{seed}"
+      span = 0.7 / job[:max]
+      a = 0.12 + span * (n - 1)
+      run_job(phase: 'render', note: format(tr(:s_attempt), n, job[:max])) do |state|
+        wait_and_fetch(pid) { |q| state[:pct] = a + q.to_f * span }
       end
     end
 
-    # 一次尝试结束（主线程里，由轮询定时器调用）。返回最终要展示的结果；返回 nil 表示已经开始下一次尝试。
-    def cloud_attempt_finished(image)
-      job = @cloud_job
-      score = job[:lines_path] ? GeometryCheck.score_files(job[:lines_path], image[:local]) : nil
-      image[:score] = score
-      rlog "  attempt #{job[:attempts]} geometry score=#{score ? score.round(3) : 'n/a'}"
-      best = job[:best]
-      job[:best] = image if best.nil? || (score && (best[:score].nil? || score > best[:score]))
-
-      if score && score < GEOMETRY_PASS_SCORE && job[:attempts] < job[:max_attempts]
-        to_js('renderProgress', { pct: 0.2, note: format(tr(:s_retry), (score * 100).round) })
-        start_cloud_attempt
+    # 主线程：一个任务结束后决定下一步。返回最终结果；返回 nil 表示已经提交了下一个任务。
+    def zimage_job_step(image)
+      job = @job
+      if job[:stage] == :attempt
+        score = GeometryCheck.score_files(job[:lines_path], image[:local])
+        image[:score] = score
+        rlog "  attempt #{job[:attempts]} structure score=#{score ? score.round(3) : 'n/a'}"
+        best = job[:best]
+        job[:best] = image if best.nil? || (score && (best[:score].nil? || score > best[:score]))
+        if score && score < GEOMETRY_PASS_SCORE && job[:attempts] < job[:max]
+          to_js('renderProgress', { pct: 0.12, note: format(tr(:s_retry), (score * 100).round) })
+          start_zimage_attempt
+        else
+          start_zimage_finish
+        end
         return nil
       end
-      @cloud_job = nil
-      job[:best]
+      image[:score] = job[:best][:score]
+      @job = nil
+      image
     end
 
-    # 后台线程跑一次云端调用（HTTP 可能要 20-120 秒），结果写盘后交给轮询定时器。
-    def run_cloud(phase:, note:, mode: nil, &call)
-      @render_state = { pct: 0.15, note: note, done: false, error: nil, image: nil, phase: phase, mode: mode,
-                        cloud: true, t0: Time.now }
+    def start_zimage_finish
+      job = @job
+      job[:stage] = :finish
+      client = ComfyClient.new
+      name = client.stage_input(job[:best][:local])
+      if job[:seedvr]
+        graph = PhotoBuilder.build_seedvr(input_filename: name, seedvr: job[:seedvr], width: job[:w], height: job[:h],
+                                          seed: rand(1..2_147_483_646))
+        note = tr(:s_upscale)
+      else
+        esr = client.models('upscale_models').find { |f| f =~ /esrgan|4x/i }
+        graph = PhotoBuilder.build_resize(input_filename: name, width: job[:w], height: job[:h],
+                                          esrgan: [job[:w], job[:h]].max > 1600 ? esr : nil)
+        note = tr(:s_resize)
+      end
+      File.write(File.join(WORK_DIR, 'last_finish_graph.json'), JSON.pretty_generate(graph)) rescue nil
+      pid = client.queue(graph)
+      rlog "  finish queued #{pid} (#{job[:seedvr] ? 'seedvr2' : 'resize'}) #{job[:w]}x#{job[:h]}"
+      run_job(phase: 'render', note: note) do |state|
+        wait_and_fetch(pid) { |q| state[:pct] = 0.84 + q.to_f * 0.14 }
+      end
+    end
+
+    # 后台线程跑一个任务（块里等 ComfyUI 出图并取回），结果交给轮询定时器。
+    def run_job(phase:, note:, mode: nil)
+      @render_state = { pct: 0.15, note: note, done: false, error: nil, image: nil, phase: phase, mode: mode }
       state = @render_state
       @render_thread = Thread.new do
         begin
-          bytes = call.call
-          raise '云端返回了空图片' if bytes.nil? || bytes.bytesize < 200
-          state[:image] = save_cloud_result(bytes, phase == 'render' ? 'final' : "#{mode}_final")
+          state[:image] = yield(state)
           state[:done] = true
         rescue StandardError => e
-          state[:error] = "#{e.class == Cloud::Error ? '' : "#{e.class}: "}#{e.message}"
+          state[:error] = "#{e.class}: #{e.message}"
           state[:done] = true
-          rlog "CLOUD THREAD FAILED: #{e.class}: #{e.message}\n#{Array(e.backtrace).first(5).join("\n")}"
+          rlog "JOB THREAD FAILED: #{e.class}: #{e.message}\n#{Array(e.backtrace).first(5).join("\n")}"
         end
       end
       start_poll_timer
-    end
-
-    def cloud_output_dir
-      base = File.directory?(ComfyClient::OUTPUT_DIR) ? ComfyClient::OUTPUT_DIR : WORK_DIR
-      dir = File.join(base, 'SU_AI_Render')
-      Dir.mkdir(dir) unless Dir.exist?(dir)
-      dir
-    end
-
-    def save_cloud_result(bytes, tag)
-      ext = bytes.byteslice(0, 3) == "\xFF\xD8\xFF".b ? '.jpg' : '.png'
-      name = "#{Time.now.strftime('%Y%m%d_%H%M%S')}_#{rand(1000)}_cloud_#{tag}#{ext}"
-      path = File.join(cloud_output_dir, name)
-      File.binwrite(path, bytes)
-      rlog "CLOUD RESULT: #{path} (#{bytes.bytesize} bytes)"
-      { local: path, comfy_path: path, filename: name }
-    end
-
-    def write_data_uri(data_uri, base_path)
-      ext = data_uri =~ %r{\Adata:image/jpe?g} ? '.jpg' : '.png'
-      path = base_path + ext
-      File.binwrite(path, data_uri.sub(%r{\Adata:image/[^;]+;base64,}, '').unpack1('m'))
-      path
-    end
-
-    # Seedream 需要明确像素尺寸才能严格按截图比例出图；总像素限制在方舟接受的范围内
-    def seedream_pixels(ratio, resolution)
-      short = { '1K' => 1024, '2K' => 1440, '4K' => 2160 }[Cloud.size_tier(resolution)]
-      w, h = ratio >= 1 ? [(short * ratio).round, short] : [short, (short / ratio).round]
-      w -= w % 16
-      h -= h % 16
-      w, h = [w, h].map { |x| (x * 1.1).round - ((x * 1.1).round % 16) } while w * h < 921_600
-      "#{w}x#{h}"
-    end
-
-    # 结果窗口的 AI 调色 / 增强真实感：选了云端引擎就走云端（保结构能力比 SDXL 低降噪强得多）
-    def image_tier(path)
-      rep = Sketchup::ImageRep.new(path)
-      long = [rep.width, rep.height].max
-      long > 3000 ? '4K' : (long > 1500 ? '2K' : '1K')
-    rescue StandardError
-      '2K'
     end
 
     # 后台线程：等主渲染 → (可选) 细节锁第二遍 → 拿最终图。渲染 / 调色 / 真实感增强共用。
@@ -666,22 +635,36 @@ module AydinCreative
 
         if st[:done]
           stop_poll_timer
-          # 云端第 2/3 次尝试失败了，但前面已经有一张能用的 → 用前面那张，不报错
-          if st[:error] && st[:phase] == 'render' && @cloud_job && @cloud_job[:best]
-            rlog "  attempt failed (#{st[:error]}), falling back to best earlier attempt"
-            st[:image] = @cloud_job[:best]
+          # Z-Image 管线里某一步失败了，但手里已经有能用的图 → 用它，不整单报错
+          if st[:error] && st[:phase] == 'render' && @job && @job[:best]
+            rlog "  job step failed (#{st[:error]}), continuing with best image so far"
             st[:error] = nil
-            @cloud_job = nil
+            if @job[:stage] == :attempt
+              begin
+                start_zimage_finish
+                next
+              rescue StandardError => e
+                rlog "  finish could not start: #{e.message}"
+              end
+            end
+            st[:image] = @job[:best]
+            @job = nil
           end
 
           if st[:error]
-            @cloud_job = nil if st[:phase] == 'render'
+            @job = nil if st[:phase] == 'render'
             to_js('renderError', { message: st[:error] })
             to_result_js('gradeError', { message: st[:error] }) if st[:phase] == 'grade'
           else
-            if st[:phase] == 'render' && @cloud_job
-              final = cloud_attempt_finished(st[:image])
-              next if final.nil? # 已经开始下一次尝试，@render_state 换成了新的
+            if st[:phase] == 'render' && @job
+              begin
+                final = zimage_job_step(st[:image])
+              rescue StandardError => e
+                rlog "zimage_job_step ERROR: #{e.class}: #{e.message}"
+                final = @job && @job[:best] ? @job[:best] : st[:image]
+                @job = nil
+              end
+              next if final.nil? # 已经提交了下一个任务，@render_state 换成了新的
               st[:image] = final
             end
             @last_result = st[:image]
@@ -693,17 +676,10 @@ module AydinCreative
             end
           end
           @render_state = nil
+        elsif st[:phase] == 'grade'
+          to_result_js('gradeProgress', { pct: st[:pct], mode: st[:mode] })
         else
-          # 云端没有进度可查，按经验时长(约 40 秒一张)画一条渐近的进度
-          if st[:cloud]
-            el = Time.now - st[:t0]
-            st[:pct] = 0.15 + 0.8 * (1 - Math.exp(-el / 40.0))
-          end
-          if st[:phase] == 'grade'
-            to_result_js('gradeProgress', { pct: st[:pct], mode: st[:mode] })
-          else
-            to_js('renderProgress', { pct: st[:pct], note: st[:note] })
-          end
+          to_js('renderProgress', { pct: st[:pct], note: st[:note] })
         end
       end
     end
@@ -715,7 +691,7 @@ module AydinCreative
 
     def stop_render
       stop_poll_timer
-      @cloud_job = nil
+      @job = nil
       @render_thread.kill if @render_thread&.alive?
       @render_thread = nil
       @render_state = nil
@@ -748,10 +724,9 @@ module AydinCreative
 
     def result_payload
       return { ok: false } unless @last_result && File.exist?(@last_result[:local])
-      mime_out = %w[.jpg .jpeg].include?(File.extname(@last_result[:local]).downcase) ? 'image/jpeg' : 'image/png'
       payload = {
         ok: true,
-        data_uri: "data:#{mime_out};base64,#{[File.binread(@last_result[:local])].pack('m0')}",
+        data_uri: "data:image/png;base64,#{[File.binread(@last_result[:local])].pack('m0')}",
         filename: @last_result[:filename],
         score: @last_result[:score] && (@last_result[:score] * 100).round
       }
@@ -792,18 +767,6 @@ module AydinCreative
 
       rlog "\n===== AI grade: #{instruction} ====="
       begin
-        settings = load_settings
-        if cloud_engine?(settings)
-          src = @last_result[:local]
-          cloud = Cloud.build_client(settings)
-          tier = image_tier(src)
-          prompt = CloudPrompt.grade_prompt(instruction)
-          to_result_js('gradeProgress', { pct: 0.1, mode: 'grade' })
-          return run_cloud(phase: 'grade', mode: 'grade', note: 'grade') do
-            cloud.render(prompt: prompt, images: [{ path: src, mime: Cloud.mime_for(src) }], size_tier: tier)
-          end
-        end
-
         client = ComfyClient.new
         raise tr(:err_comfy, client.base) unless client.online?
         input_name = client.stage_input(@last_result[:local])
@@ -828,19 +791,6 @@ module AydinCreative
       rlog "\n===== enhance upload (strength=#{strength}) ====="
       begin
         raise '没有收到图片数据' unless data_uri.to_s.start_with?('data:image')
-        settings = load_settings
-        if cloud_engine?(settings)
-          up = write_data_uri(data_uri, File.join(WORK_DIR, "upload_#{Time.now.strftime('%Y%m%d_%H%M%S')}"))
-          @last_source_path = up
-          cloud = Cloud.build_client(settings)
-          tier = image_tier(up)
-          prompt = CloudPrompt.enhance_prompt(strength)
-          to_result_js('gradeProgress', { pct: 0.1, mode: 'enhance' })
-          return run_cloud(phase: 'grade', mode: 'enhance', note: 'enhance') do
-            cloud.render(prompt: prompt, images: [{ path: up, mime: Cloud.mime_for(up) }], size_tier: tier)
-          end
-        end
-
         client = ComfyClient.new
         raise tr(:err_comfy, client.base) unless client.online?
 

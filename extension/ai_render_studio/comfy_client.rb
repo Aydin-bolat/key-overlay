@@ -43,6 +43,28 @@ module AydinCreative
         nil
       end
 
+      # 这个 ComfyUI 里有没有某个节点（老版本 ComfyUI 可能还没有 SeedVR2 / Z-Image 控制节点）
+      def node?(class_type)
+        @node_cache ||= {}
+        return @node_cache[class_type] if @node_cache.key?(class_type)
+        res = get("/object_info/#{class_type}", timeout: 10)
+        ok = res.is_a?(Net::HTTPSuccess) && JSON.parse(res.body).key?(class_type)
+        @node_cache[class_type] = ok
+      rescue StandardError
+        false
+      end
+
+      # 某个模型文件夹里的文件列表（diffusion_models / text_encoders / vae / model_patches ...）
+      def models(folder)
+        @model_cache ||= {}
+        return @model_cache[folder] if @model_cache.key?(folder)
+        res = get("/models/#{folder}", timeout: 10)
+        list = res.is_a?(Net::HTTPSuccess) ? Array(JSON.parse(res.body)) : []
+        @model_cache[folder] = list
+      rescue StandardError
+        []
+      end
+
       # 把本地图片放进 ComfyUI 输入目录，返回它在 LoadImage 里用的文件名
       def stage_input(local_path)
         raise "输入图不存在: #{local_path}" unless File.exist?(local_path)

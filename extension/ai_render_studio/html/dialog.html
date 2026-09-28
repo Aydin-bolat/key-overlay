@@ -49,30 +49,13 @@
     </div>
 
     <div class="field" id="engine-box">
-      <label data-i18n="engine_label">渲染引擎</label>
+      <label data-i18n="engine_label">本地渲染引擎</label>
       <select id="engine">
-        <option value="gemini" data-i18n="engine_gemini">Nano Banana Pro（Google · 真实感最强）</option>
-        <option value="seedream" data-i18n="engine_seedream">Seedream（字节 · 火山方舟 · 国内直连）</option>
-        <option value="local" data-i18n="engine_local">本地 ComfyUI（RealVisXL · 免费离线）</option>
+        <option value="zimage" data-i18n="engine_zimage">Z-Image Turbo + SeedVR2（照片级，推荐）</option>
+        <option value="sdxl" data-i18n="engine_sdxl">RealVisXL（旧版）</option>
       </select>
-      <div id="cloud-cfg">
-        <span class="sub" id="key-label" data-i18n="key_label">API Key</span>
-        <input type="password" id="api-key" autocomplete="off" spellcheck="false">
-        <p class="muted tiny" id="key-state"></p>
-        <label class="check"><input type="checkbox" id="auto-retry" checked> <span data-i18n="auto_retry">结构检查 + 自动择优（偏差大就重出，最多 3 张）</span></label>
-        <details>
-          <summary data-i18n="engine_advanced">高级：模型 ID / 代理</summary>
-          <span class="sub" data-i18n="model_id">模型 ID（留空＝默认）</span>
-          <input type="text" id="model-id" spellcheck="false">
-          <span class="sub" data-i18n="proxy_label">代理（访问 Google 用，例：127.0.0.1:7890）</span>
-          <input type="text" id="proxy" spellcheck="false" placeholder="127.0.0.1:7890">
-        </details>
-      </div>
-      <div id="cfg-actions">
-        <button id="save-cfg" class="small" data-i18n="save_cfg">保存设置</button>
-        <span id="cfg-saved"></span>
-      </div>
-      <p class="muted tiny" id="engine-note"></p>
+      <label class="check" id="retry-row"><input type="checkbox" id="auto-retry" checked> <span data-i18n="auto_retry">结构检查 + 自动择优（偏差大就换种子重出，最多 3 张）</span></label>
+      <div id="model-status" class="muted tiny"></div>
     </div>
 
     <div class="field">

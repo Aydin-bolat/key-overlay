@@ -13,9 +13,8 @@
     snapNatural: null,
     comfyOnline: false, comfyBase: '',
     refDataUri: null, rendering: false,
-    settings: { engine: 'gemini' }
+    settings: { engine: 'zimage', auto_retry: true }, models: null
   };
-  var DEFAULT_MODEL = { gemini: 'gemini-3-pro-image-preview', seedream: 'doubao-seedream-4-5-251128' };
 
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var $all = function (s, r) { return Array.prototype.slice.call((r || document).querySelectorAll(s)); };
@@ -50,8 +49,10 @@
         break;
       case 'settings':
         applySettings(p);
-        $('#cfg-saved').textContent = T('cfg_saved');
-        setTimeout(function () { $('#cfg-saved').textContent = ''; }, 2500);
+        break;
+      case 'models':
+        state.models = p;
+        renderModelStatus();
         break;
       case 'comfy':
         setComfy(p.online, p.base);
@@ -102,58 +103,39 @@
   }
 
   function pretty(o) { try { return JSON.stringify(o, null, 2); } catch (e) { return String(o); } }
-  function isCloud() { return state.settings.engine === 'gemini' || state.settings.engine === 'seedream'; }
-  function canRender() { return isCloud() ? true : state.comfyOnline; }
-  function resetBtn() { var b = $('#render-btn'); b.disabled = !canRender(); b.textContent = T('render_btn'); }
-
-  /* ---------- 渲染引擎设置 ---------- */
+  /* ---------- 引擎 ---------- */
   function applySettings(s) {
-    state.settings = s || { engine: 'gemini' };
-    if (!state.settings.engine) state.settings.engine = 'gemini';
-    $('#engine').value = state.settings.engine;
+    state.settings = s || state.settings;
+    $('#engine').value = state.settings.engine || 'zimage';
     $('#auto-retry').checked = state.settings.auto_retry !== false;
-    $('#proxy').value = state.settings.proxy || '';
     refreshEngineUi();
   }
-
   function refreshEngineUi() {
-    var eng = $('#engine').value;
-    var cloud = eng !== 'local';
-    $('#cloud-cfg').hidden = !cloud;
-    $('#api-key').value = '';
-    if (cloud) {
-      var isSet = !!state.settings[eng + '_key_set'];
-      $('#key-label').textContent = T(eng === 'gemini' ? 'key_label_gemini' : 'key_label_seedream');
-      $('#api-key').placeholder = isSet ? ('•••• ' + (state.settings[eng + '_key_tail'] || '')) : T('key_ph');
-      var ks = $('#key-state');
-      ks.textContent = isSet ? T('key_ok') : T('key_missing');
-      ks.className = 'muted tiny ' + (isSet ? 'key-ok' : 'key-missing');
-      $('#model-id').value = state.settings[eng + '_model'] || '';
-      $('#model-id').placeholder = DEFAULT_MODEL[eng];
-    }
-    $('#engine-note').textContent = T('engine_note_' + eng);
-    $('#geom-note').textContent = T(cloud ? 'geom_note_cloud' : 'geom_note');
-    $('#render-note').textContent = T(cloud ? 'render_note_cloud' : 'render_note');
-    setComfy(state.comfyOnline, state.comfyBase);
-    updateResHint();
+    var z = $('#engine').value === 'zimage';
+    $('#retry-row').hidden = !z;
+    $('#geom-note').textContent = T(z ? 'geom_note_zimage' : 'geom_note');
+    $('#render-note').textContent = T(z ? 'render_note_zimage' : 'render_note');
+    renderModelStatus();
   }
-
+  function esc(t) { return String(t).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
+  function renderModelStatus() {
+    var box = $('#model-status'), m = state.models;
+    if ($('#engine').value !== 'zimage' || !m) { box.innerHTML = ''; return; }
+    var html = m.ok ? '<span class="ok">' + esc(T('models_ok')) + '</span>'
+      : '<span class="err">' + esc(T('models_missing')) + '</span>\n' + esc((m.missing || []).join('\n'));
+    html += '\n' + (m.seedvr ? '<span class="ok">' + esc(T('seedvr_ok')) + '</span>'
+      : '<span class="warn">' + esc(T('seedvr_missing')) + '</span>\n' + esc(m.seedvr_hint || ''));
+    box.innerHTML = html;
+  }
   function saveSettings() {
-    var eng = $('#engine').value;
-    var data = { engine: eng, auto_retry: $('#auto-retry').checked, proxy: $('#proxy').value.trim() };
-    if (eng !== 'local') {
-      data[eng + '_key'] = $('#api-key').value.trim();
-      data[eng + '_model'] = $('#model-id').value.trim();
-    }
-    state.settings.engine = eng;
-    call('save_settings', JSON.stringify(data));
-  }
-
-  $('#engine').addEventListener('change', function () {
-    state.settings.engine = this.value;
+    state.settings = { engine: $('#engine').value, auto_retry: $('#auto-retry').checked };
+    call('save_settings', JSON.stringify(state.settings));
     refreshEngineUi();
-    saveSettings(); // 切换引擎立即生效（Key 为空 = 不修改已保存的 Key）
-  });
+  }
+  $('#engine').addEventListener('change', saveSettings);
+  $('#auto-retry').addEventListener('change', saveSettings);
+
+  function resetBtn() { var b = $('#render-btn'); b.disabled = !state.comfyOnline; b.textContent = T('render_btn'); }
 
   /* ---------- 取景框遮罩 ---------- */
   function drawFrame() {
@@ -179,10 +161,9 @@
   function setComfy(online, base) {
     if (base != null) state.comfyBase = base;
     state.comfyOnline = !!online;
-    $('#comfy-dot').className = 'dot ' + (online ? 'ok' : (isCloud() ? '' : 'err'));
-    $('#comfy-text').textContent = online ? (T('comfy_online') + ' · ' + (state.comfyBase || ''))
-      : (isCloud() ? T('comfy_offline_cloud') : T('comfy_offline'));
-    $('#render-btn').disabled = !canRender() || state.rendering;
+    $('#comfy-dot').className = 'dot ' + (online ? 'ok' : 'err');
+    $('#comfy-text').textContent = online ? (T('comfy_online') + ' · ' + (state.comfyBase || '')) : T('comfy_offline');
+    $('#render-btn').disabled = !online || state.rendering;
   }
 
   function renderPresets() {
@@ -220,10 +201,8 @@
     return Math.max(d.w, d.h) >= 1600;
   }
 
-  var CLOUD_TIER = { '240p': '1K', '360p': '1K', '480p': '1K', '720p': '1K', '1080p': '2K', '1440p': '2K', '2160p': '4K' };
   function updateResHint() {
     state.resolution = $('#resolution').value;
-    if (isCloud()) { $('#res-hint').textContent = T('res_hint_cloud', { tier: CLOUD_TIER[state.resolution] || '2K' }); return; }
     var d = outputDims();
     var tail = needsUpscale() ? T('res_hint_upscale') : '';
     $('#res-hint').textContent = T('res_hint', { w: d.w, h: d.h, tail: tail });
@@ -238,7 +217,6 @@
     var t = ev.target.closest('button');
     if (!t) return;
     if (t.id === 'refresh-btn') call('refresh_view');
-    else if (t.id === 'save-cfg') saveSettings();
     else if (t.dataset.aspect) {
       state.aspect = t.dataset.aspect;
       setSeg('#aspect', t);
@@ -318,6 +296,7 @@
       renderPresets();
       updateResHint();
       drawFrame();
+      setComfy(state.comfyOnline, state.comfyBase);
       refreshEngineUi();
       if (!state.rendering) resetBtn();
       call('set_lang', this.value);
