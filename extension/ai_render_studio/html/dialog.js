@@ -13,7 +13,7 @@
     snapNatural: null,
     comfyOnline: false, comfyBase: '',
     refDataUri: null, rendering: false,
-    settings: { engine: 'zimage', auto_retry: true }, models: null
+    settings: { auto_retry: true }, models: null
   };
 
   var $ = function (s, r) { return (r || document).querySelector(s); };
@@ -110,21 +110,18 @@
   /* ---------- 引擎 ---------- */
   function applySettings(s) {
     state.settings = s || state.settings;
-    $('#engine').value = state.settings.engine || 'zimage';
     $('#auto-retry').checked = state.settings.auto_retry !== false;
     refreshEngineUi();
   }
   function refreshEngineUi() {
-    var z = $('#engine').value === 'zimage';
-    $('#retry-row').hidden = !z;
-    $('#geom-note').textContent = T(z ? 'geom_note_zimage' : 'geom_note');
-    $('#render-note').textContent = T(z ? 'render_note_zimage' : 'render_note');
+    $('#geom-note').textContent = T('geom_note_zimage');
+    $('#render-note').textContent = T('render_note_zimage');
     renderModelStatus();
   }
   function esc(t) { return String(t).replace(/[&<>]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]; }); }
   function renderModelStatus() {
     var box = $('#model-status'), m = state.models;
-    if ($('#engine').value !== 'zimage' || !m) { box.innerHTML = ''; return; }
+    if (!m) { box.innerHTML = ''; return; }
     var html = m.ok ? '<span class="ok">' + esc(T('models_ok')) + '</span>'
       : '<span class="err">' + esc(T('models_missing')) + '</span>\n' + esc((m.missing || []).join('\n'));
     html += '\n' + (m.seedvr ? '<span class="ok">' + esc(T('seedvr_ok')) + '</span>'
@@ -152,11 +149,10 @@
       '<button class="small ghost" data-act="cancel_download">' + esc(T('cancel')) + '</button>';
   }
   function saveSettings() {
-    state.settings = { engine: $('#engine').value, auto_retry: $('#auto-retry').checked };
+    state.settings = { auto_retry: $('#auto-retry').checked };
     call('save_settings', JSON.stringify(state.settings));
     refreshEngineUi();
   }
-  $('#engine').addEventListener('change', saveSettings);
   $('#auto-retry').addEventListener('change', saveSettings);
 
   function resetBtn() { var b = $('#render-btn'); b.disabled = !state.comfyOnline; b.textContent = T('render_btn'); }

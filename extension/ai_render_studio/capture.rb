@@ -55,7 +55,7 @@ module AydinCreative
       end
 
       # ---- 边线图：把模型里每一条边（线脚/石膏线/绗缝/凹槽）都描出来 ----
-      # 给 ControlNet(Canny) 用，锁住细节几何。这里不动 RenderMode（earlier RenderMode 改值会报错），
+      # 给 ControlNet 和结构吻合度检查用，锁住细节几何。默认不动 RenderMode（以前改它报过错），
       # 只是关纹理 + 打开所有边线 + 关阴影 —— 得到"带全部黑边的模型图"，Canny 能提取每一条。
       def lines(view, path, opts = {})
         model = view.model
@@ -201,137 +201,6 @@ module AydinCreative
         raise '截图失败：view.write_image 没有产出文件' if bad?(path)
         clog "textured: ok #{File.size(path)} bytes  (edges off)"
         { path: path, w: w, h: h }
-      end
-
-      # ---- 深度图 + 法线图：一遍射线采样，两张图都出 -----------------------
-      # 深度：近=白、远=黑（没命中/背景=纯黑，当"无穷远"）。
-      # 法线：相机空间编码（R=右, G=上, B=朝向相机），朝相机的平面大致是浅蓝紫色，
-      # 是法线图最常见的视觉习惯，圆顶/坡地这类曲面靠它能明显减少被 AI 改形状。
-      # 两张都是喂给 Flux.2 Klein 当额外参考图用的空间线索，不是视觉效果图，分辨率
-      # 不用很高——后面 ImageScaleToTotalPixels 还会再缩放一次。
-      # 用 Sketchup::ImageRep#set_data 直接从像素字节生成 PNG，不依赖任何外部库。
-      #
-      # 真实踩过的坑：raytest 每条射线的耗时因模型复杂度差异极大——同一份代码在一个模型上
-      # 每条 ~0.06ms，换一个重一点的模型能到 ~4ms（70 倍差距）。固定分辨率(=固定射线数)
-      # 在重模型上会让 SketchUp 主线程卡死几分钟（真实复现过一次，被迫强制关闭 SketchUp）。
-      # 所以先拿一小撮射线校准这台机器/这个模型的真实速度，据此决定用多大的采样网格；
-      # 正式采样时也是每条射线都检查一次截止时间（不是每行才查一次），保证绝不会失控。
-      # 9-28：深度图从"软参考图"变成了 ControlNet 硬约束的输入之一，分辨率太粗(实测
-      # 48x32 这种)会让吊灯这类细节丢形状——原来 240 长边上限是给"软提示"够用的档位，
-      # 现在得给够，时间预算和长边上限都调高(仍然是"先测速再定网格+每条射线查超时"，
-      # 不会因为调大就有卡死风险)。
-      GEOM_TIME_BUDGET = 8.0
-      GEOM_MAX_LONG_EDGE = 400
-      GEOM_MIN_LONG_EDGE = 48
-      GEOM_CALIBRATION_RAYS = 12
-
-      def geometry_maps(view, depth_path, normal_path, opts = {})
-        model = view.model
-        eye = view.camera.eye
-        vpw = view.vpwidth
-        vph = view.vpheight
-        ar = aspect_value(view, opts[:aspect] || 'window')
-
-        forward = view.camera.direction.normalize
-        up_axis = view.camera.up.normalize
-        right_axis = forward.cross(up_axis).normalize
-
-        per_ray = calibrate_ray_cost(view, model)
-        budget_rays = (GEOM_TIME_BUDGET / per_ray).floor
-        long_edge = Math.sqrt(budget_rays * (ar >= 1.0 ? ar : 1.0 / ar)).round
-        long_edge = long_edge.clamp(GEOM_MIN_LONG_EDGE, GEOM_MAX_LONG_EDGE)
-        cols, rows = dims_for(ar, long_edge)
-        clog "geometry_maps: calibrated #{(per_ray * 1000).round(3)}ms/ray -> grid #{cols}x#{rows}"
-
-        deadline = Time.now + GEOM_TIME_BUDGET
-        dists = Array.new(rows * cols)
-        norms = Array.new(rows * cols)
-        near = Float::INFINITY
-        far = 0.0
-
-        catch(:geom_deadline) do
-          rows.times do |r|
-            y = ((r + 0.5) / rows * vph).to_i
-            cols.times do |c|
-              throw :geom_deadline if Time.now > deadline
-
-              x = ((c + 0.5) / cols * vpw).to_i
-              ray = view.pickray(x, y)
-              next unless ray
-
-              result = model.raytest(ray, true)
-              next unless result
-
-              point, hit_path = result
-              idx = r * cols + c
-              d = eye.distance(point)
-              dists[idx] = d
-              near = d if d < near
-              far = d if d > far
-
-              leaf = hit_path.last
-              next unless leaf.is_a?(Sketchup::Face)
-
-              n = leaf.normal
-              hit_path[0...-1].each { |ent| n = ent.transformation * n if ent.respond_to?(:transformation) }
-              n = n.normalize
-              norms[idx] = [n.dot(right_axis), n.dot(up_axis), -n.dot(forward)]
-            end
-          end
-        end
-
-        near = 0.0 if near.infinite?
-        far = near + 1.0 if far <= near
-        span = far - near
-
-        depth_px = String.new(capacity: rows * cols * 3)
-        normal_px = String.new(capacity: rows * cols * 3)
-        (rows * cols).times do |i|
-          d = dists[i]
-          v = d ? (255 - ((d - near) / span * 255).clamp(0, 255).round) : 0
-          depth_px << v.chr << v.chr << v.chr
-
-          n = norms[i]
-          if n
-            normal_px << ((n[0] * 0.5 + 0.5) * 255).round.clamp(0, 255).chr
-            normal_px << ((n[1] * 0.5 + 0.5) * 255).round.clamp(0, 255).chr
-            normal_px << ((n[2] * 0.5 + 0.5) * 255).round.clamp(0, 255).chr
-          else
-            normal_px << 128.chr << 128.chr << 255.chr # 没命中：占位成"朝相机"的中性蓝
-          end
-        end
-
-        di = Sketchup::ImageRep.new
-        di.set_data(cols, rows, 24, 0, depth_px)
-        di.save_file(depth_path)
-        ni = Sketchup::ImageRep.new
-        ni.set_data(cols, rows, 24, 0, normal_px)
-        ni.save_file(normal_path)
-
-        d_ok = !bad?(depth_path)
-        n_ok = !bad?(normal_path)
-        clog "geometry_maps: depth=#{d_ok} normal=#{n_ok} #{cols}x#{rows} near=#{near.round(2)}in far=#{far.round(2)}in"
-        {
-          depth: d_ok ? { path: depth_path, w: cols, h: rows } : nil,
-          normal: n_ok ? { path: normal_path, w: cols, h: rows } : nil
-        }
-      rescue StandardError => e
-        clog "geometry_maps EXCEPTION #{e.class}: #{e.message}"
-        { depth: nil, normal: nil }
-      end
-
-      # 拿一小撮随机射线量一下这台机器/这个模型 raytest 的真实速度（每条射线的秒数），
-      # 供 geometry_maps() 据此决定采样网格大小，不管模型多重都不会失控。
-      def calibrate_ray_cost(view, model)
-        vpw = view.vpwidth
-        vph = view.vpheight
-        t0 = Time.now
-        GEOM_CALIBRATION_RAYS.times do
-          ray = view.pickray(rand(vpw), rand(vph))
-          ray && model.raytest(ray, true)
-        end
-        elapsed = Time.now - t0
-        [elapsed / GEOM_CALIBRATION_RAYS, 0.00002].max
       end
 
       def set_ro(ro, key, val)

@@ -7,7 +7,6 @@ require File.join(__dir__, 'presets')
 require File.join(__dir__, 'model_extractor')
 require File.join(__dir__, 'capture')
 require File.join(__dir__, 'comfy_client')
-require File.join(__dir__, 'workflow_builder')
 require File.join(__dir__, 'photo_builder')
 require File.join(__dir__, 'geometry_check')
 require File.join(__dir__, 'downloader')
@@ -34,7 +33,6 @@ module AydinCreative
     @comfy_launch_started = false
     @aspect = 'window'
     @aspect_ratio = 0.0
-    STAGE2_REFINE_STRENGTH = 100 # build_enhance 的强度(不暴露给用户)，映射到它的 denoise 上限 0.45——参考真实发布过的 archviz ComfyUI 工作流"材质精修遍"用的就是这个档位（0.30 那档是给"外部图/没有 ControlNet 兜底"场景留的保守值，这里结构已经在第一阶段被 ControlNet 锁死了，可以给够材质自由度）
     @last_opts = {}          # 上次渲染设置，供"重新渲染"用
     @last_result = nil       # { local:, comfy_path:, filename: }
     @job = nil               # Z-Image 管线的多次尝试/择优/放大状态，见 on_render_zimage
@@ -44,7 +42,7 @@ module AydinCreative
     STRINGS = {
       'zh' => {
         s_probe: '检查本地模型…', s_attempt: 'Z-Image 照片级出图（第 %d/%d 张）…', s_retry: '结构吻合度 %d%%，换种子重出…', s_upscale: '高分辨率细化 + SeedVR2 精修放大…', s_resize: '高分辨率细化 + 放大（未安装 SeedVR2）…',
-        s_extract: '提取模型信息…（大模型可能要几秒）', s_capture: '截取当前视角…', s_connect: '连接 ComfyUI…', s_upload: '上传结构图…', s_upref: '上传参考图…', s_build: '生成工作流…', s_submit: '提交到 ComfyUI…', s_detail: '细节锁：补回线脚/绗缝等细节…', s_processing: 'ComfyUI 处理中',
+        s_extract: '提取模型信息…（大模型可能要几秒）', s_capture: '截取当前视角…', s_connect: '连接 ComfyUI…', s_upload: '上传结构图…', s_upref: '上传参考图…', s_build: '生成工作流…', s_submit: '提交到 ComfyUI…', s_processing: 'ComfyUI 处理中',
         menu_open: '打开渲染面板', menu_reload: '重新加载插件（开发）', menu_log: '打开日志文件夹',
         cmd_name: 'AI 渲染', cmd_tip: 'AI 渲染工作室',
         reloaded: 'AI 渲染工作室：已重新加载。请重新打开渲染面板。',
@@ -56,7 +54,7 @@ module AydinCreative
       },
       'en' => {
         s_probe: 'Checking local models…', s_attempt: 'Z-Image photoreal pass (%d/%d)…', s_retry: 'Structure match %d%%, re-rendering with a new seed…', s_upscale: 'High-res refine + SeedVR2 detail upscale…', s_resize: 'High-res refine + resize (SeedVR2 not installed)…',
-        s_extract: 'Reading model info… (a few seconds on big models)', s_capture: 'Capturing the view…', s_connect: 'Connecting to ComfyUI…', s_upload: 'Uploading structure image…', s_upref: 'Uploading reference image…', s_build: 'Building workflow…', s_submit: 'Submitting to ComfyUI…', s_detail: 'Detail lock: restoring mouldings and seams…', s_processing: 'ComfyUI is working',
+        s_extract: 'Reading model info… (a few seconds on big models)', s_capture: 'Capturing the view…', s_connect: 'Connecting to ComfyUI…', s_upload: 'Uploading structure image…', s_upref: 'Uploading reference image…', s_build: 'Building workflow…', s_submit: 'Submitting to ComfyUI…', s_processing: 'ComfyUI is working',
         menu_open: 'Open render panel', menu_reload: 'Reload plugin (dev)', menu_log: 'Open log folder',
         cmd_name: 'AI Render', cmd_tip: 'AI Render Studio',
         reloaded: 'AI Render Studio: reloaded. Please reopen the render panel.',
@@ -68,7 +66,7 @@ module AydinCreative
       },
       'ru' => {
         s_probe: 'Проверка локальных моделей…', s_attempt: 'Z-Image фотореализм (%d/%d)…', s_retry: 'Совпадение структуры %d%%, повтор с новым seed…', s_upscale: 'SeedVR2 апскейл деталей…', s_resize: 'Масштабирование (SeedVR2 не установлен)…',
-        s_extract: 'Чтение данных модели… (несколько секунд для больших)', s_capture: 'Снимок вида…', s_connect: 'Подключение к ComfyUI…', s_upload: 'Загрузка структурного изображения…', s_upref: 'Загрузка референса…', s_build: 'Сборка воркфлоу…', s_submit: 'Отправка в ComfyUI…', s_detail: 'Фиксация деталей: восстановление профилей и швов…', s_processing: 'ComfyUI обрабатывает',
+        s_extract: 'Чтение данных модели… (несколько секунд для больших)', s_capture: 'Снимок вида…', s_connect: 'Подключение к ComfyUI…', s_upload: 'Загрузка структурного изображения…', s_upref: 'Загрузка референса…', s_build: 'Сборка воркфлоу…', s_submit: 'Отправка в ComfyUI…', s_processing: 'ComfyUI обрабатывает',
         menu_open: 'Открыть панель рендеринга', menu_reload: 'Перезагрузить плагин (разр.)', menu_log: 'Открыть папку логов',
         cmd_name: 'AI Рендер', cmd_tip: 'AI Студия рендеринга',
         reloaded: 'AI Студия рендеринга: перезагружено. Откройте панель заново.',
@@ -80,7 +78,7 @@ module AydinCreative
       },
       'kk' => {
         s_probe: 'Жергілікті модельдерді тексеру…', s_attempt: 'Z-Image фотошынайы рендер (%d/%d)…', s_retry: 'Құрылым сәйкестігі %d%%, жаңа seed-пен қайта…', s_upscale: 'SeedVR2 бөлшектерді үлкейту…', s_resize: 'Мақсатты өлшемге үлкейту (SeedVR2 жоқ)…',
-        s_extract: 'Модель ақпаратын оқу… (үлкен модельдерде бірнеше секунд)', s_capture: 'Көріністі түсіру…', s_connect: 'ComfyUI-ге қосылу…', s_upload: 'Құрылым суретін жүктеу…', s_upref: 'Үлгі суретті жүктеу…', s_build: 'Воркфлоу құру…', s_submit: 'ComfyUI-ге жіберу…', s_detail: 'Бөлшек бекіту: профильдер мен тігістерді қалпына келтіру…', s_processing: 'ComfyUI жұмыс істеуде',
+        s_extract: 'Модель ақпаратын оқу… (үлкен модельдерде бірнеше секунд)', s_capture: 'Көріністі түсіру…', s_connect: 'ComfyUI-ге қосылу…', s_upload: 'Құрылым суретін жүктеу…', s_upref: 'Үлгі суретті жүктеу…', s_build: 'Воркфлоу құру…', s_submit: 'ComfyUI-ге жіберу…', s_processing: 'ComfyUI жұмыс істеуде',
         menu_open: 'Рендер панелін ашу', menu_reload: 'Плагинді қайта жүктеу (әзірлеу)', menu_log: 'Журнал қалтасын ашу',
         cmd_name: 'AI Рендер', cmd_tip: 'AI Рендер студиясы',
         reloaded: 'AI Рендер студиясы: қайта жүктелді. Панельді қайта ашыңыз.',
@@ -101,26 +99,23 @@ module AydinCreative
       args.empty? ? s : format(s, *args)
     end
 
-    # ================= 引擎设置 =================
-    # engine: 'zimage'(默认，Z-Image Turbo + ControlNet + SeedVR2) | 'sdxl'(旧的 RealVisXL 管线)
+    # ================= 设置 =================
+    # 渲染只有一条管线：Z-Image Turbo + ControlNet + SeedVR2（2026-09-28 删掉了旧的 RealVisXL 引擎——
+    # 实测出图像线稿上色的插画，完全达不到照片级）。可调的只剩"自动择优"开关。
     SETTINGS_SECTION = 'ars_render_studio'
-    ENGINES = %w[zimage sdxl].freeze
     MAX_ATTEMPTS = 3            # 开"自动择优"时一次渲染最多出几张（本地出图不花钱，只花时间）
     GEOMETRY_PASS_SCORE = 0.55  # 结构吻合度低于这个就换种子重出（合成测试：对齐≈0.95，错位/丢物体≈0.3-0.4）
 
     def load_settings
-      engine = (Sketchup.read_default(SETTINGS_SECTION, 'cfg_engine', 'zimage') rescue 'zimage').to_s
       retry_v = (Sketchup.read_default(SETTINGS_SECTION, 'cfg_auto_retry', true) rescue true)
-      { engine: ENGINES.include?(engine) ? engine : 'zimage', auto_retry: retry_v == true || retry_v.to_s == 'true' }
+      { auto_retry: retry_v == true || retry_v.to_s == 'true' }
     end
 
     def save_settings(json)
       data = JSON.parse(json.to_s)
-      Sketchup.write_default(SETTINGS_SECTION, 'cfg_engine', data['engine'].to_s) if ENGINES.include?(data['engine'].to_s)
       Sketchup.write_default(SETTINGS_SECTION, 'cfg_auto_retry', data['auto_retry'] ? true : false) if data.key?('auto_retry')
       rlog "settings saved: #{load_settings}"
       to_js('settings', load_settings)
-      push_model_status
     rescue StandardError => e
       rlog "save_settings ERROR: #{e.class}: #{e.message}"
     end
@@ -401,82 +396,8 @@ module AydinCreative
         strength = 0 if strength < 0
         strength = 100 if strength > 100
         settings = load_settings
-        rlog "opts: engine=#{settings[:engine]} aspect=#{@aspect} res=#{opts[:resolution]} ai=#{strength} kind=#{opts[:kind]} preset=#{opts[:preset_key]}"
-        return on_render_zimage(opts, v, strength, settings) if settings[:engine] == 'zimage'
-
-        ctx = step(tr(:s_extract), 0.04) { ModelExtractor.extract(v) }
-        rlog "  rays_hit=#{ctx[:rays_hit]}  mats=#{(ctx[:visible_materials] || []).size}"
-
-        stamp = Time.now.strftime('%Y%m%d_%H%M%S')
-        src = File.join(WORK_DIR, "source_#{stamp}.png")
-        cap = step(tr(:s_capture), 0.08) { Capture.textured(v, src, shadows: opts[:shadows], aspect: @aspect) }
-        rlog "  src #{File.exist?(src) ? File.size(src) : 'MISSING'} bytes  #{cap[:w]}x#{cap[:h]}"
-        @last_source_path = src   # 结果窗口滑动对比条的"渲染前"那一半
-
-        # 深度图 + 边线图：9-28 换引擎之后这两个不再是可选的"结构约束"开关，而是新架构里
-        # ControlNet 硬约束的输入，必须有——真正保证"不改变任何物体"的就是它们 + denoise，
-        # 不再是文字层面的"请模型别改"。永远生成，不再看面板上的勾选状态。
-        # 边线图是 SketchUp 真实几何边线（不是图像算法检测的 Canny），比从截图里检测的准。
-        # raytest 测速自适应网格，绝不会拖慢/卡住 SketchUp。
-        depth_path = File.join(WORK_DIR, "depth_#{stamp}.png")
-        normal_path = File.join(WORK_DIR, "normal_#{stamp}.png") # 法线图新架构暂时用不上，仍顺带生成(同一遍射线)但不接进图里
-        geo = (Capture.geometry_maps(v, depth_path, normal_path, aspect: @aspect) rescue { depth: nil, normal: nil })
-        rlog "  geometry_maps depth=#{geo[:depth] ? 'ok' : 'skipped'}"
-
-        lines_path = File.join(WORK_DIR, "lines_#{stamp}.png")
-        lin = (Capture.lines(v, lines_path, aspect: @aspect) rescue nil)
-        rlog "  lines #{lin ? "#{File.size(lines_path)}b" : 'skipped'}"
-
-        preset_text = opts[:preset_key].to_s.empty? ? nil : Presets.text_for(opts[:mode], opts[:preset_key], opts[:kind])
-
-        client = ComfyClient.new
-        step(tr(:s_connect), 0.10) do
-          raise tr(:err_comfy, client.base) unless client.online?
-        end
-
-        input_name = step(tr(:s_upload), 0.11) { client.stage_input(src) }
-        depth_name = (geo[:depth] && File.exist?(depth_path)) ? (client.stage_input(depth_path) rescue nil) : nil
-        canny_name = (lin && File.exist?(lines_path)) ? (client.stage_input(lines_path) rescue nil) : nil
-        rlog "  staged depth=#{depth_name} canny=#{canny_name}"
-        raise '深度图/边线图都没能生成——结构约束是新引擎的硬性前提，检查 render.log 里 capture 相关报错' if depth_name.nil? && canny_name.nil?
-
-        # 新架构里参考图不再把像素喂给模型（SDXL 单文本编码器，没有多图输入能力），只当
-        # "有没有提供参考图"这个文字层面的提示用，不需要真的上传/编码，省一次 I/O。
-        has_ref = opts[:ref_data_uri].to_s.start_with?('data:image')
-        rlog "  reference provided=#{has_ref} (text-only hint in this architecture)"
-
-        graph = step(tr(:s_build), 0.12) do
-          WorkflowBuilder.build(
-            kind: opts[:kind] || 'exterior',
-            input_filename: input_name,
-            reference_filename: has_ref ? 'provided' : nil,
-            depth_filename: depth_name,
-            canny_filename: canny_name,
-            model_context: ctx,
-            preset_prompt: preset_text,
-            user_prompt: opts[:user_prompt],
-            ai_strength: opts[:ai_strength],
-            aspect_ratio: Capture.aspect_value(v, @aspect),
-            resolution: opts[:resolution],
-            seed: opts[:seed]
-          )
-        end
-        File.write(File.join(WORK_DIR, 'last_graph.json'), JSON.pretty_generate(graph)) rescue nil
-
-        pid = step(tr(:s_submit), 0.13) { client.queue(graph) }
-        rlog "  queued pid=#{pid}"
-        # 两阶段：结构锁定(ControlNet，上面已提交) → 精修(build_enhance，无 ControlNet，
-        # 专心把材质画细 + 顺便放大到目标分辨率)。拆成两遍是实测出来的：一遍到位既要锁死
-        # 结构又要出好材质，实测容易画糊/画花；分两遍各司其职效果明显更好。
-        # 第二阶段也带上深度/边线 ControlNet：以前这一遍完全不带约束、denoise 0.45，
-        # 正是"第一遍锁住的结构，第二遍又被画走样"的原因之一。
-        run_pipeline(pid, phase: 'render', detail: {
-          strength: STAGE2_REFINE_STRENGTH,
-          resolution: opts[:resolution],
-          aspect_ratio: Capture.aspect_value(v, @aspect),
-          depth_filename: depth_name,
-          canny_filename: canny_name
-        })
+        rlog "opts: aspect=#{@aspect} res=#{opts[:resolution]} ai=#{strength} kind=#{opts[:kind]} preset=#{opts[:preset_key]}"
+        on_render_zimage(opts, v, strength, settings)
       rescue StandardError, ScriptError => e
         rlog "on_render ABORTED: #{e.class}: #{e.message}"
         to_js('renderError', { message: "#{e.message}\n\n" + tr(:err_seealso, e.class) })
@@ -495,7 +416,7 @@ module AydinCreative
       log_model_folders(res) unless res[:ok]
       unless res[:ok]
         tip = (res[:downloads] || []).empty? ? '' : "\n\n→ 面板右上「本地渲染引擎」下面有「一键下载」按钮，点它会自动下载到 ComfyUI 正确的文件夹。"
-        raise "Z-Image 管线还缺东西（按下面补齐后再试；或在面板里把引擎切回 RealVisXL）：\n\n" +
+        raise "Z-Image 管线还缺东西（按下面补齐后再试）：\n\n" +
               res[:missing].join("\n") + tip
       end
       rlog "  models #{res[:models]} seedvr=#{res[:seedvr] || 'none'}"
@@ -513,7 +434,7 @@ module AydinCreative
       rlog "  lines clean=#{lin[:clean]}"
 
       input_name, lines_name = step(tr(:s_upload), 0.10) { [client.stage_input(src), client.stage_input(lines_path)] }
-      vlm = client.node?('TextGenerate') && client.models('text_encoders').include?(WorkflowBuilder::VISION_CLIP) ? WorkflowBuilder::VISION_CLIP : nil
+      vlm = client.node?('TextGenerate') && client.models('text_encoders').include?(PhotoBuilder::VISION_CLIP) ? PhotoBuilder::VISION_CLIP : nil
       ref_name = nil
       if vlm && opts[:ref_data_uri].to_s.start_with?('data:image')
         ref_path = File.join(WORK_DIR, "ref_#{stamp}.png")
@@ -608,39 +529,6 @@ module AydinCreative
           state[:error] = "#{e.class}: #{e.message}"
           state[:done] = true
           rlog "JOB THREAD FAILED: #{e.class}: #{e.message}\n#{Array(e.backtrace).first(5).join("\n")}"
-        end
-      end
-      start_poll_timer
-    end
-
-    # 后台线程：等主渲染 → (可选) 细节锁第二遍 → 拿最终图。渲染 / 调色 / 真实感增强共用。
-    def run_pipeline(pid, phase:, detail: nil, mode: nil)
-      @render_state = { pct: 0.15, note: tr(:s_processing) + " (#{pid[0, 8]})…", done: false, error: nil, image: nil, phase: phase, mode: mode }
-      @render_thread = Thread.new do
-        begin
-          res = wait_and_fetch(pid) { |q| @render_state[:pct] = 0.15 + q.to_f * (detail ? 0.52 : 0.82) }
-
-          if detail
-            @render_state[:note] = tr(:s_detail)
-            @render_state[:pct] = 0.70
-            base_name = ComfyClient.new.stage_input(res[:local])
-            dg = WorkflowBuilder.build_enhance(
-              input_filename: base_name, strength: detail[:strength],
-              resolution: detail[:resolution], aspect_ratio: detail[:aspect_ratio],
-              depth_filename: detail[:depth_filename], canny_filename: detail[:canny_filename]
-            )
-            File.write(File.join(WORK_DIR, 'last_detail_graph.json'), JSON.pretty_generate(dg)) rescue nil
-            dpid = ComfyClient.new.queue(dg)
-            rlog "  stage2 refine queued #{dpid}"
-            res = wait_and_fetch(dpid) { |q| @render_state[:pct] = 0.72 + q.to_f * 0.25 }
-          end
-
-          @render_state[:image] = res
-          @render_state[:done] = true
-        rescue StandardError => e
-          @render_state[:error] = "#{e.class}: #{e.message}"
-          @render_state[:done] = true
-          rlog "THREAD FAILED: #{e.class}: #{e.message}\n#{Array(e.backtrace).first(5).join("\n")}"
         end
       end
       start_poll_timer
@@ -808,57 +696,59 @@ module AydinCreative
       UI.start_timer(0.5, false) { on_render(JSON.generate(opts)) }
     end
 
-    # AI 调色：拿现有结果图，走一遍低降噪 RealVisXL，带用户的调色指令
+    # AI 调色 / 上传图片增强真实感：都是 Z-Image 低降噪 img2img（PhotoBuilder.build_finish），
+    # 增强那个再加 SeedVR2 精修。调色不过 SeedVR2——它的 LAB 颜色对齐会把刚调的色往回拉。
     def ai_grade(instruction)
       return to_result_js('gradeError', { message: tr(:err_no_result) }) unless @last_result && File.exist?(@last_result[:local])
-      return to_result_js('gradeError', { message: '已有任务在进行中。' }) if @render_thread&.alive?
+      return to_result_js('gradeError', { message: tr(:err_busy) }) if @render_thread&.alive?
 
       rlog "\n===== AI grade: #{instruction} ====="
-      begin
-        client = ComfyClient.new
-        raise tr(:err_comfy, client.base) unless client.online?
-        input_name = client.stage_input(@last_result[:local])
-        graph = WorkflowBuilder.build_grade(input_filename: input_name, instruction: instruction.to_s)
-        File.write(File.join(WORK_DIR, 'last_grade_graph.json'), JSON.pretty_generate(graph)) rescue nil
-        pid = client.queue(graph)
-        rlog "  grade queued pid=#{pid}"
-        to_result_js('gradeProgress', { pct: 0.1, mode: 'grade' })
-        run_pipeline(pid, phase: 'grade', mode: 'grade')
-      rescue StandardError => e
-        rlog "ai_grade ABORTED: #{e.class}: #{e.message}"
-        to_result_js('gradeError', { message: "#{e.message}" })
-      end
+      touchup(@last_result[:local], mode: 'grade', prompt: PhotoBuilder.grade_prompt(instruction),
+                                    denoise: PhotoBuilder::GRADE_DENOISE, seedvr: false)
     end
 
-    # 真实感增强：跟 ai_grade 不一样的地方是它不需要已有渲染结果——用户随手拖一张
-    # 别的渲染软件（Vray/Corona/Enscape/Lumion...）出的图进来也能用。走 RealVisXL
-    # 低降噪 img2img（WorkflowBuilder.build_enhance），成品直接顶替 @last_result，
-    # 上传的原图顶替 @last_source_path，这样保存/AI调色/滑动对比条都能照常复用。
+    # 不需要已有渲染结果——随手拖一张别的渲染软件（Vray/Corona/Enscape/Lumion/D5…）出的图进来也能用。
+    # 成品顶替 @last_result，上传的原图顶替 @last_source_path，保存/调色/滑动对比都照常复用。
     def enhance_upload(data_uri, strength)
       return to_result_js('gradeError', { message: tr(:err_busy) }) if @render_thread&.alive?
       rlog "\n===== enhance upload (strength=#{strength}) ====="
-      begin
-        raise '没有收到图片数据' unless data_uri.to_s.start_with?('data:image')
-        client = ComfyClient.new
-        raise tr(:err_comfy, client.base) unless client.online?
+      raise '没有收到图片数据' unless data_uri.to_s.start_with?('data:image')
+      ext = data_uri =~ %r{\Adata:image/jpe?g} ? '.jpg' : '.png'
+      up_path = File.join(WORK_DIR, "upload_#{Time.now.strftime('%Y%m%d_%H%M%S')}#{ext}")
+      File.binwrite(up_path, data_uri.sub(%r{\Adata:image/[^;]+;base64,}, '').unpack1('m'))
+      @last_source_path = up_path
+      touchup(up_path, mode: 'enhance', prompt: PhotoBuilder.enhance_prompt,
+                       denoise: PhotoBuilder.enhance_denoise(strength), seedvr: true)
+    rescue StandardError => e
+      rlog "enhance_upload ABORTED: #{e.class}: #{e.message}"
+      to_result_js('gradeError', { message: e.message })
+    end
 
-        b64 = data_uri.sub(/\Adata:image\/[^;]+;base64,/, '')
-        stamp = Time.now.strftime('%Y%m%d_%H%M%S')
-        up_path = File.join(WORK_DIR, "upload_#{stamp}.png")
-        File.binwrite(up_path, b64.unpack1('m'))
-        @last_source_path = up_path
+    def touchup(path, mode:, prompt:, denoise:, seedvr:)
+      client = ComfyClient.new
+      raise tr(:err_comfy, client.base) unless client.online?
+      res = PhotoBuilder.resolve(client)
+      raise "Z-Image 模型不齐：\n#{res[:missing].join("\n")}" unless res[:ok]
 
-        input_name = client.stage_input(up_path)
-        graph = WorkflowBuilder.build_enhance(input_filename: input_name, strength: strength)
-        File.write(File.join(WORK_DIR, 'last_enhance_graph.json'), JSON.pretty_generate(graph)) rescue nil
-        pid = client.queue(graph)
-        rlog "  enhance queued pid=#{pid}"
-        to_result_js('gradeProgress', { pct: 0.1, mode: 'enhance' })
-        run_pipeline(pid, phase: 'grade', mode: 'enhance')
-      rescue StandardError => e
-        rlog "enhance_upload ABORTED: #{e.class}: #{e.message}"
-        to_result_js('gradeError', { message: e.message })
+      # 输出尺寸 = 原图尺寸（8 的倍数，长边最多 3840）
+      rep = Sketchup::ImageRep.new(path)
+      k = [3840.0 / [rep.width, rep.height].max, 1.0].min
+      w = (rep.width * k).round / 8 * 8
+      h = (rep.height * k).round / 8 * 8
+      name = client.stage_input(path)
+      graph = PhotoBuilder.build_finish(input_filename: name, models: res[:models], prompt: prompt, width: w, height: h,
+                                        seed: rand(1..2_147_483_646), seedvr: seedvr ? res[:seedvr] : nil,
+                                        denoise: denoise, tag: "#{mode}_final")
+      File.write(File.join(WORK_DIR, "last_#{mode}_graph.json"), JSON.pretty_generate(graph)) rescue nil
+      pid = client.queue(graph)
+      rlog "  #{mode} queued #{pid} #{w}x#{h} denoise=#{denoise}"
+      to_result_js('gradeProgress', { pct: 0.1, mode: mode })
+      run_job(phase: 'grade', mode: mode, note: mode) do |state|
+        wait_and_fetch(pid) { |q| state[:pct] = 0.1 + q.to_f * 0.85 }
       end
+    rescue StandardError => e
+      rlog "#{mode} ABORTED: #{e.class}: #{e.message}"
+      to_result_js('gradeError', { message: e.message })
     end
 
     # ================= 工具 =================
@@ -935,7 +825,7 @@ module AydinCreative
       rescue StandardError
         nil
       end
-      %w[presets model_extractor capture comfy_client workflow_builder main].each do |f|
+      %w[presets model_extractor capture comfy_client geometry_check downloader photo_builder main].each do |f|
         load File.join(__dir__, "#{f}.rb")
       end
       UI.messagebox(tr(:reloaded))

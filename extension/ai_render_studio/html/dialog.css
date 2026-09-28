@@ -86,8 +86,7 @@ details#analysis-box summary{cursor:pointer;color:var(--muted);font-size:12px;
 
 /* ---- 引擎 ---- */
 #engine-box{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:10px}
-select#engine{width:100%;background:var(--panel);color:var(--text);border:1px solid var(--line);
-  border-radius:7px;padding:7px 8px;font:inherit}
+#engine-box .engine-name{font-weight:600;color:var(--text)}
 #model-status{white-space:pre-wrap;word-break:break-all}
 #model-status .ok{color:var(--ok)} #model-status .warn{color:var(--warn)} #model-status .err{color:var(--err)}
 #model-status .dl-btns{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}

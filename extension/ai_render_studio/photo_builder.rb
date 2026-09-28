@@ -22,6 +22,60 @@ module AydinCreative
     module PhotoBuilder
       module_function
 
+      # 看图识物用的小型 VLM（gemma）：ControlNet 锁得住"这里有个这个形状的东西"，锁不住"它到底是床还是沙发"。
+      # 构件名是乱码时（比如 VRay 导入的"建E_model7723"），靠它看图告诉扩散模型物体类别。
+      VISION_CLIP = 'gemma4_e4b_it_fp8_scaled.safetensors'
+
+      RES_SHORT_EDGE = {
+        '240p' => 240, '360p' => 360, '480p' => 480, '720p' => 720,
+        '1080p' => 1080, '1440p' => 1440, '2160p' => 2160, '4k' => 2160, '4K' => 2160
+      }.freeze
+
+      def vision_checklist_prompt
+        'Look at this flat-shaded 3D model preview image and identify every distinct piece of furniture or major ' \
+        'object actually visible. Answer with ONLY a short comma-separated list - no numbering, no markdown, no ' \
+        'extra sentences before or after. For each item write its exact real-world category (bed, sofa, armchair, ' \
+        'dining chair, desk, table, nightstand, wardrobe, bookshelf, floor lamp, table lamp, pendant light, wall ' \
+        'light, plant, rug, mirror, artwork, or other) followed by its rough position in parentheses, in exactly ' \
+        'this format: bed (centre background), nightstand (left of bed), wardrobe (right background). Judge the ' \
+        'category strictly from silhouette and proportions alone, ignoring colour - a bed is never a sofa, an ' \
+        'armchair is never a dining chair. Do not invent anything not actually visible.'
+      end
+
+      # ---- 材质物理质感字典 -------------------------------------------------
+      # Ayden 要的"认知材质挑选光滑/硬度/毛发"：不需要另接一个 PBR 贴图生成模型
+      # (Ubisoft CHORD / TRELLIS2 这类是给"造贴图数据"用的，跟咱们直接出一张成品
+      # 照片的模式接不上)，纯粹是提示词工程——SketchUp 材质名/贴图文件名本身就是
+      # 很强的关键词信号(比如"Fabric_Sofa"/"木地板")，按关键词分类后每类补一句该
+      # 材质该有的物理质感(粗糙度/反光/绒毛方向)，比通用的"photorealistic materials"
+      # 精确得多。中英文关键词都配，顺序即优先级，第一个命中的算数。
+      MATERIAL_PHYSICS = [
+        [/glass|玻璃|window\s*pane|幕墙/, 'glass: perfectly smooth, hard, highly specular and transparent/translucent, sharp reflections and slight refraction, no visible surface texture'],
+        [/mirror|镜/, 'mirror-polished: perfectly smooth and hard with sharp, undistorted reflections'],
+        [/chrome|不锈钢|stainless|polished\s*metal|铬|抛光金属/, 'polished metal: very smooth and hard, strong anisotropic specular highlights, cool-toned mirror-like reflections'],
+        [/metal|steel|iron|aluminu?m|brass|copper|bronze|金属|钢|铁|铝|黄铜|铜|青铜/, 'metal: hard and smooth to satin, moderate-to-strong specular highlight, subtle reflections, minimal surface roughness'],
+        [/leather|皮革|真皮/, 'leather: semi-gloss with fine natural grain texture, visible creases and stitching, warm soft specular highlights, moderately soft to the touch'],
+        [/velvet|丝绒|天鹅绒/, 'velvet: very soft directional nap that changes shade with viewing angle, deep matte shadows between fibers, subtle fuzzy rim highlights'],
+        [/carpet|rug|\bfur\b|plush|地毯|毛毯|絨|绒毛|羊毛毯/, 'carpet/fur: deep soft pile with visible directional nap/fur catching rim light, matte and non-reflective, soft shadowed crevices between fibers'],
+        [/fabric|textile|upholst|linen|cotton|wool|silk|cushion|pillow|sofa|布艺|布料|棉|麻|羊毛|丝绸|沙发布|靠垫|窗帘|curtain/, 'fabric: soft matte surface with visible woven texture, gentle diffuse shadowing, slight softness/give at seams and folds'],
+        [/wood|oak|walnut|pine|plywood|timber|木|橡木|胡桃木|松木|夹板|木地板|木纹/, 'wood: satin to semi-gloss finish, visible grain direction and natural colour variation, warm mid-strength specular highlight, hard but with organic surface variation'],
+        [/marble|granite|travertine|大理石|花岗岩/, 'polished stone: hard, satin-to-glossy with natural veining/speckling, moderate reflectivity, subtle micro-roughness'],
+        [/concrete|cement|混凝土|水泥/, 'concrete: hard, matte to low-satin, fine uniform micro-roughness, subtle pores and colour variation, minimal specular highlight'],
+        [/stone|rock|石材|石头|岩/, 'natural stone: hard, matte to satin, irregular texture and colour variation, low specular highlight'],
+        [/brick|砖/, 'brick: hard, rough matte masonry texture, visible mortar joints, uneven natural colour variation'],
+        [/tile|ceramic|porcelain|瓷砖|陶瓷/, 'ceramic tile: hard, smooth semi-gloss to glossy, uniform reflections, crisp grout lines'],
+        [/plastic|acrylic|塑料|亚克力/, 'plastic: smooth, hard, moderate uniform specular highlight, slightly artificial sheen unless matte-finished'],
+        [/plant|leaf|leaves|foliage|grass|tree|植物|叶|草坪|树/, 'foliage: organic irregular matte surface with a subtle waxy sheen on leaves, natural colour variation, soft directional highlights'],
+        [/water|pool|pond|水|泳池|水池/, 'water: reflective liquid surface with gentle ripples, mirror-like reflections and slight refraction'],
+        [/wallpaper|壁纸/, 'wallpaper: matte, slightly soft texture, very low specular highlight']
+      ].freeze
+
+      def material_physics_hint(name, texture_file)
+        text = "#{name} #{texture_file}".to_s.downcase
+        hit = MATERIAL_PHYSICS.find { |rx, _| rx.match?(text) }
+        hit && hit[1]
+      end
+
       # ---- 模型文件自动识别 ---------------------------------------------------
       # 不写死文件名：去 ComfyUI 的模型目录里按关键字找。实际装机时常见的几种"其实有、但没被找到"：
       #   - Z-Image 的 ControlNet 放进了 controlnet/（它是 model patch，必须在 model_patches/）
@@ -252,7 +306,7 @@ module AydinCreative
         if vlm_model
           g['vclip'] = { 'class_type' => 'CLIPLoader', 'inputs' => { 'clip_name' => vlm_model, 'type' => 'ltxv' } }
           g['vlm'] = { 'class_type' => 'TextGenerate', 'inputs' => {
-            'clip' => ['vclip', 0], 'image' => ['src_s', 0], 'prompt' => WorkflowBuilder.vision_checklist_prompt,
+            'clip' => ['vclip', 0], 'image' => ['src_s', 0], 'prompt' => vision_checklist_prompt,
             'max_length' => 150, 'sampling_mode' => 'off'
           } }
           g['vlm_txt'] = { 'class_type' => 'StringConcatenate', 'inputs' => {
@@ -335,7 +389,9 @@ module AydinCreative
         [((width * k) / 16).round * 16, ((height * k) / 16).round * 16]
       end
 
-      def build_finish(input_filename:, models:, prompt:, width:, height:, seed:, seedvr: nil, esrgan: nil, refine: true)
+      # denoise：渲染管线用 REFINE_DENOISE；结果窗口的"AI 调色 / 增强真实感"也走这张图，传自己的值
+      def build_finish(input_filename:, models:, prompt:, width:, height:, seed:, seedvr: nil, esrgan: nil, refine: true,
+                       denoise: REFINE_DENOISE, tag: 'final')
         stamp = Time.now.strftime('%Y%m%d_%H%M%S')
         g = { 'img' => { 'class_type' => 'LoadImage', 'inputs' => { 'image' => input_filename } } }
         src = ['img', 0]
@@ -357,7 +413,7 @@ module AydinCreative
           g['r_lat'] = { 'class_type' => 'VAEEncode', 'inputs' => { 'pixels' => ['r_in', 0], 'vae' => vae_ref(models) } }
           g['r_ks'] = { 'class_type' => 'KSampler', 'inputs' => {
             'model' => ['r_ms', 0], 'seed' => seed, 'steps' => 5, 'cfg' => 1.0, 'sampler_name' => 'dpmpp_2m_sde', 'scheduler' => 'beta',
-            'positive' => ['r_pos', 0], 'negative' => ['r_neg', 0], 'latent_image' => ['r_lat', 0], 'denoise' => REFINE_DENOISE
+            'positive' => ['r_pos', 0], 'negative' => ['r_neg', 0], 'latent_image' => ['r_lat', 0], 'denoise' => denoise
           } }
           g['r_dec'] = { 'class_type' => 'VAEDecode', 'inputs' => { 'samples' => ['r_ks', 0], 'vae' => vae_ref(models) } }
           src = ['r_dec', 0]
@@ -384,13 +440,35 @@ module AydinCreative
           } }
           out = ['sv_post', 0]
         end
-        g['save'] = { 'class_type' => 'SaveImage', 'inputs' => { 'images' => out, 'filename_prefix' => "SU_AI_Render/#{stamp}_final" } }
+        g['save'] = { 'class_type' => 'SaveImage', 'inputs' => { 'images' => out, 'filename_prefix' => "SU_AI_Render/#{stamp}_#{tag}" } }
         g
+      end
+
+      # ---- 结果窗口：AI 调色 / 上传图片增强真实感（都用 Z-Image 低降噪 img2img）------------
+      GRADE_DENOISE = 0.28
+
+      def grade_prompt(instruction)
+        instr = instruction.to_s.strip
+        instr = 'a subtle professional colour grade' if instr.empty?
+        "A real professional architectural photograph, the same scene with this colour grade and mood: #{instr}. " \
+        'Natural believable photographic colour, high dynamic range, crisp detail, every material and object unchanged.'
+      end
+
+      # 强度 0-100 → denoise 0.18-0.35（官方模板：>0.35 容易出瑕疵）
+      def enhance_denoise(strength)
+        (0.18 + strength.to_i.clamp(0, 100) / 100.0 * 0.17).round(3)
+      end
+
+      def enhance_prompt
+        'A real professional architectural and interior photograph, shot on a full-frame camera, perfectly exposed, ' \
+        'realistic global illumination and soft shadows, every surface with real physical material texture: wood grain, ' \
+        'fabric weave, stone veining, metal and glass reflections. Natural colour, high dynamic range, crisp detail, ' \
+        'no haze. Edges defined only by real light and material, never by drawn outlines.'
       end
 
       # 目标输出尺寸（8 的倍数），跟面板上"输出清晰度"一致
       def output_dims(aspect_ratio, resolution)
-        short = WorkflowBuilder::RES_SHORT_EDGE[resolution.to_s] || 1080
+        short = RES_SHORT_EDGE[resolution.to_s] || 1080
         ar = aspect_ratio.to_f
         ar = 16.0 / 9.0 if ar <= 0
         w, h = ar >= 1.0 ? [(short * ar).round, short] : [short, (short / ar).round]
@@ -446,7 +524,7 @@ module AydinCreative
         mats.first(8).map do |x|
           name = (x[:name] || x['name']).to_s
           next if name.start_with?('(')
-          hint = WorkflowBuilder.material_physics_hint(name, x[:texture_file] || x['texture_file'])
+          hint = material_physics_hint(name, x[:texture_file] || x['texture_file'])
           placeholder = name =~ PLACEHOLDER_NAME
           next nil unless hint || (use_names && !placeholder)
           label = use_names && !placeholder ? name.tr('_', ' ') : nil

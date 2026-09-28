@@ -3,11 +3,11 @@
 SketchUp 一键 AI 照片级渲染，**全部在本地 ComfyUI 里运行，不用任何在线 API**。
 `extension/` 就是 `F:\SU插件\extension` 的内容，同一个文件夹里还有 Material Painter 插件。
 
-## 0.2.0：新的本地照片级管线（默认引擎）
+## 0.2.0：本地照片级管线
 
 ```
 SketchUp 视图截图 ─┐
-                   ├─► Z-Image Turbo + Fun ControlNet Union ─► 结构吻合度检查 ─► SeedVR2 7B 精修放大 ─► 成品
+                   ├─► Z-Image Turbo + Fun ControlNet Union ─► 结构吻合度检查 ─► Z-Image 高分辨率细化 ─► SeedVR2 7B 精修放大 ─► 成品
 SketchUp 真实边线 ─┘   （img2img，边线锁结构）                  （偏差大就换种子重出，最多 3 张，留最好的）
 ```
 
@@ -20,10 +20,7 @@ SketchUp 真实边线 ─┘   （img2img，边线锁结构）                  
 
 以上都是 ComfyUI 的原生节点，节点接法照 ComfyUI 官方模板（`image_z_image_turbo_fun_union_controlnet`、`utility_seedvr2_7b_int8_upscale_image`），**不需要装任何自定义节点**。
 
-另外，旧的 RealVisXL 引擎也修了 3 个问题，它仍然可以在面板里选：
-- Canny ControlNet 之前收到的是反相的线稿，边线约束基本失效；
-- 第二遍精修不带任何约束，而且 denoise 是 0.45，会把结构改掉；
-- 提示词太长，超出 SDXL 的 77 token 上限。
+旧的 RealVisXL（SDXL）引擎已经删除：实测出图像线稿上色的插画，达不到照片级。结果窗口里的「AI 调色」和「上传图片增强真实感」也改成了 Z-Image 低降噪 img2img（增强真实感再加 SeedVR2）。
 
 ## 需要下载的模型
 
@@ -50,7 +47,7 @@ SketchUp 真实边线 ─┘   （img2img，边线锁结构）                  
 
 1. 用本仓库的 `extension/` 覆盖 `F:\SU插件\extension`。
 2. 在 SketchUp 里点「扩展 → AI 渲染工作室 → 重新加载插件（开发）」，或者直接重启 SketchUp。
-3. 打开面板，引擎保持默认的「Z-Image Turbo + SeedVR2」，AI 强度保持 0 到 20（只换材质和光照）。
+3. 打开面板，确认模型状态是 ✓（缺的话点「一键下载」），场景类型选对（室内 / 外观），AI 强度保持 0 到 20（只换材质和光照）。
 
 ## 排查
 
