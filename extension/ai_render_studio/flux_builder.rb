@@ -66,7 +66,7 @@ module AydinCreative
       SCENE_NODES = %w[TextGenerate PreviewAny ImageBatch].freeze
 
       FLUX_NODES = %w[ReferenceLatent CFGGuider SamplerCustomAdvanced KSamplerSelect RandomNoise
-                      Flux2Scheduler EmptyFlux2LatentImage ConditioningZeroOut SplitSigmasDenoise].freeze
+                      Flux2Scheduler EmptyFlux2LatentImage ConditioningZeroOut].freeze
 
       # 同一类里有多个文件时的偏好：新版本 > 旧版本，bf16 > fp8（16GB 显存 bf16 能放下，画质更好）
       def pick(list, rx, exclude = nil)
@@ -284,30 +284,22 @@ module AydinCreative
       # prompt_text: 纯文字；vlm: 看图识物的模型文件名（有就把识别结果拼到提示词最前面）。
       STEPS = 4
 
-      # ---- 从 SketchUp 画面出发（img2img）----------------------------------------------
-      # 纯噪点出图时，截图/线稿只是"软参考"：每换一个种子，Flux 就重新设计一遍细节（石膏线消失、
-      # 墙上多出一幅画、床头变色……），AI 强度也只是一句话，0 和 5 没区别。
-      # 现在生成从 SketchUp 截图本身开始：截图编码成潜空间，只加 denoise 这么多噪点、只重画这一部分。
-      # 构图、每条线、每个物件的位置和颜色都从截图继承；AI 强度直接决定重画多少。
-      IMG2IMG_STEPS = 10     # 调度切成 10 份，按 denoise 只跑最后几步（0.1 一档）
-      INIT_MP = 2.0          # 出图 ≈2MP（原来 1MP 时细线只有一两个像素，模型看不清就自己简化掉）
-
-      # AI 强度 0–100 → denoise 0.6–1.0。0 = 重画 60%：够把 SketchUp 的平涂材质变成照片，
-      # 又保留原图的结构和颜色；100 = 完全从噪点重画（等于原来的做法）。
-      def denoise_for(strength)
-        s = strength.to_i.clamp(0, 100)
-        (6 + (4 * s / 100.0).round) / IMG2IMG_STEPS.to_f
-      end
+      # 出图 ≈2MP：第一张图（结构 LoRA 模式下是线稿控制图）按这个大小缩放，出图跟它同样大、逐像素对齐，
+      # 石膏线、拱形这种细线在控制图里有足够像素（1MP 时只有一两个像素，模型看不清就自己简化掉）。
+      # 其它参考图仍是 1MP。
+      # 2026-09-28 试过"从 SketchUp 截图出发"（img2img + SplitSigmasDenoise），实测成品发灰、发平、像矢量图，
+      # 石膏线照样丢：Klein 是 4 步蒸馏模型，只认它自己那 4 个噪声点；2MP 时调度偏移很大，"denoise 0.6"
+      # 实际从 90% 噪声开始，细线早就没了，后面几步又是它没训练过的噪声点。已撤回，回到纯噪点出图。
+      GEN_MP = 2.0
 
       # final_size: [w, h] 时在同一张图里直接放大到这个尺寸（结果窗口的调色/增强用；渲染管线是
       # 先出几张 1MP 择优，再单独 build_upscale）
       # lora: 结构 LoRA 文件名（有就挂在主模型上，权重 STRUCT_LORA_STRENGTH）
       # invert: 需要反相的图片下标（线稿颜色约定，见 LINEART_INVERT）
       # vlm_image: 看图识物看哪张图（结构 LoRA 模式下图 1 是线稿，要看图 2 的 SketchUp 截图）
-      # init: 从哪张图出发（img2img，下标；nil = 纯噪点）；denoise: 重画多少（见 denoise_for）
-      # match: 要跟出图一样大、逐像素对齐的图（线稿控制图：RefControl 按同一坐标对应线条和画面）
+      # gen_mp: 出图大小（百万像素，见 GEN_MP），第一张图按它缩放、出图跟第一张图一样大；nil = 1MP（官方模板）
       def build_edit(images:, models:, prompt_text:, seed:, tag:, vlm: nil, vlm_lead: nil, final_size: nil, esrgan: nil,
-                     lora: nil, invert: [], vlm_image: 0, init: nil, denoise: 1.0, match: [])
+                     lora: nil, invert: [], vlm_image: 0, gen_mp: nil)
         stamp = Time.now.strftime('%Y%m%d_%H%M%S')
         g = loader_nodes(models)
         model = ['unet', 0]
@@ -322,12 +314,6 @@ module AydinCreative
           model = ['kv', 0]
         end
 
-        if init
-          g['init_s'] = { 'class_type' => 'ImageScaleToTotalPixels', 'inputs' => {
-            'image' => ["img#{init}", 0], 'upscale_method' => 'lanczos', 'megapixels' => INIT_MP, 'resolution_steps' => 16
-          } }
-          g['sz'] = { 'class_type' => 'GetImageSize', 'inputs' => { 'image' => ['init_s', 0] } }
-        end
         images.each_with_index do |name, i|
           g["img#{i}"] = { 'class_type' => 'LoadImage', 'inputs' => { 'image' => name } }
           src = ["img#{i}", 0]
@@ -335,18 +321,11 @@ module AydinCreative
             g["img#{i}_inv"] = { 'class_type' => 'ImageInvert', 'inputs' => { 'image' => src } }
             src = ["img#{i}_inv", 0]
           end
-          g["img#{i}_s"] =
-            if init && match.include?(i)
-              { 'class_type' => 'ImageScale', 'inputs' => {
-                'image' => src, 'upscale_method' => 'lanczos', 'width' => ['sz', 0], 'height' => ['sz', 1], 'crop' => 'disabled'
-              } }
-            else
-              { 'class_type' => 'ImageScaleToTotalPixels', 'inputs' => {
-                'image' => src, 'upscale_method' => 'lanczos', 'megapixels' => 1.0, 'resolution_steps' => 16
-              } }
-            end
+          g["img#{i}_s"] = { 'class_type' => 'ImageScaleToTotalPixels', 'inputs' => {
+            'image' => src, 'upscale_method' => 'lanczos', 'megapixels' => i.zero? && gen_mp ? gen_mp : 1.0, 'resolution_steps' => 16
+          } }
         end
-        g['sz'] ||= { 'class_type' => 'GetImageSize', 'inputs' => { 'image' => ['img0_s', 0] } }
+        g['sz'] = { 'class_type' => 'GetImageSize', 'inputs' => { 'image' => ['img0_s', 0] } }
 
         text = prompt_text
         if vlm
@@ -379,19 +358,10 @@ module AydinCreative
         g['guider'] = { 'class_type' => 'CFGGuider', 'inputs' => { 'model' => model, 'positive' => pos, 'negative' => neg, 'cfg' => 1.0 } }
         g['sampler'] = { 'class_type' => 'KSamplerSelect', 'inputs' => { 'sampler_name' => 'euler' } }
         g['noise'] = { 'class_type' => 'RandomNoise', 'inputs' => { 'noise_seed' => seed } }
-        sigmas = ['sigmas', 0]
-        if init
-          # 截图的潜空间 + 按 denoise 加噪，只跑调度的后半段
-          g['sigmas'] = { 'class_type' => 'Flux2Scheduler', 'inputs' => { 'steps' => IMG2IMG_STEPS, 'width' => ['sz', 0], 'height' => ['sz', 1] } }
-          g['sigmas_d'] = { 'class_type' => 'SplitSigmasDenoise', 'inputs' => { 'sigmas' => ['sigmas', 0], 'denoise' => denoise.to_f.clamp(0.1, 1.0) } }
-          sigmas = ['sigmas_d', 1]
-          g['latent'] = { 'class_type' => 'VAEEncode', 'inputs' => { 'pixels' => ['init_s', 0], 'vae' => ['vae', 0] } }
-        else
-          g['sigmas'] = { 'class_type' => 'Flux2Scheduler', 'inputs' => { 'steps' => STEPS, 'width' => ['sz', 0], 'height' => ['sz', 1] } }
-          g['latent'] = { 'class_type' => 'EmptyFlux2LatentImage', 'inputs' => { 'width' => ['sz', 0], 'height' => ['sz', 1], 'batch_size' => 1 } }
-        end
+        g['sigmas'] = { 'class_type' => 'Flux2Scheduler', 'inputs' => { 'steps' => STEPS, 'width' => ['sz', 0], 'height' => ['sz', 1] } }
+        g['latent'] = { 'class_type' => 'EmptyFlux2LatentImage', 'inputs' => { 'width' => ['sz', 0], 'height' => ['sz', 1], 'batch_size' => 1 } }
         g['sample'] = { 'class_type' => 'SamplerCustomAdvanced', 'inputs' => {
-          'noise' => ['noise', 0], 'guider' => ['guider', 0], 'sampler' => ['sampler', 0], 'sigmas' => sigmas, 'latent_image' => ['latent', 0]
+          'noise' => ['noise', 0], 'guider' => ['guider', 0], 'sampler' => ['sampler', 0], 'sigmas' => ['sigmas', 0], 'latent_image' => ['latent', 0]
         } }
         g['dec'] = { 'class_type' => 'VAEDecode', 'inputs' => { 'samples' => ['sample', 0], 'vae' => ['vae', 0] } }
         out = ['dec', 0]
