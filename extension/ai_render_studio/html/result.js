@@ -19,6 +19,14 @@
         hideProgress();
         if (p.ok && p.data_uri) {
           $('#img-after').src = p.data_uri;
+          var sc = $('#score');
+          if (p.score != null) {
+            sc.textContent = T('score_label', { s: p.score });
+            sc.title = T('score_hint');
+            sc.className = p.score >= 75 ? 'good' : (p.score >= 55 ? 'mid' : 'bad');
+          } else {
+            sc.className = 'hidden';
+          }
           if (p.before_data_uri) {
             $('#img-before').src = p.before_data_uri;
             $('#img-before').classList.remove('hidden');

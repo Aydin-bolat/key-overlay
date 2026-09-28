@@ -97,11 +97,11 @@ module AydinCreative
           'vlm_b' => { 'class_type' => 'StringConcatenate', 'inputs' => {
             'string_a' => ['vlm_a', 0], 'string_b' => ':1.4)', 'delimiter' => ''
           } },
-          'p1' => { 'class_type' => 'StringConcatenate', 'inputs' => {
-            'string_a' => ['vlm_b', 0], 'string_b' => structural_prompt_body(opts, strength), 'delimiter' => "\n\n"
-          } },
+          # 2026-09-28：以前这里拼的是给 LLM 型模型写的长篇 ground truth(几百上千 token)，
+          # SDXL 的 CLIP 一段只读 77 token，后面全是噪声，反而冲淡了关键词。改成 SDXL 认的
+          # 短关键词串(见 sdxl_prompt)；长篇结构化描述留给云端引擎(CloudPrompt)。
           'p2' => { 'class_type' => 'StringConcatenate', 'inputs' => {
-            'string_a' => ['p1', 0], 'string_b' => structural_prompt_suffix(opts), 'delimiter' => "\n\n"
+            'string_a' => ['vlm_b', 0], 'string_b' => sdxl_prompt(opts), 'delimiter' => ",\n"
           } },
           '3' => { 'class_type' => 'CLIPTextEncode', 'inputs' => { 'clip' => ['1', 1], 'text' => ['p2', 0] } },
           '4' => { 'class_type' => 'CLIPTextEncode', 'inputs' => { 'clip' => ['1', 1], 'text' => structural_negative } },
@@ -123,10 +123,21 @@ module AydinCreative
             'image' => ["#{base}_img", 0], 'upscale_method' => 'lanczos',
             'width' => ['2sz', 0], 'height' => ['2sz', 1], 'crop' => 'disabled'
           } }
+          cn_input = ["#{base}_rs", 0]
+          if tag == 'canny'
+            # 2026-09-28 修的 bug：Capture.lines 出的是"白底/色块 + 黑线"，而 SDXL Canny ControlNet
+            # 训练时吃的是"黑底白线"的 Canny 边缘图。以前直接把线稿原图喂进去，等于告诉模型
+            # "满屏都是边缘"，Canny 约束基本失效——这是本地管线结构总是跑偏的主要原因之一。
+            # 过一遍 Canny 节点，得到标准的黑底白线边缘图。
+            graph["#{base}_edge"] = { 'class_type' => 'Canny', 'inputs' => {
+              'image' => ["#{base}_rs", 0], 'low_threshold' => 0.15, 'high_threshold' => 0.35
+            } }
+            cn_input = ["#{base}_edge", 0]
+          end
           graph["#{base}_model"] = { 'class_type' => 'ControlNetLoader', 'inputs' => { 'control_net_name' => model_name } }
           graph["#{base}_apply"] = { 'class_type' => 'ControlNetApplyAdvanced', 'inputs' => {
             'positive' => pos_link, 'negative' => neg_link, 'control_net' => ["#{base}_model", 0],
-            'image' => ["#{base}_rs", 0], 'strength' => cn_strength, 'start_percent' => 0.0, 'end_percent' => cn_end
+            'image' => cn_input, 'strength' => cn_strength, 'start_percent' => 0.0, 'end_percent' => cn_end
           } }
           pos_link = ["#{base}_apply", 0]
           neg_link = ["#{base}_apply", 1]
@@ -157,9 +168,33 @@ module AydinCreative
       # Ruby 这边只管拼 VLM 前后的文字。
       def vision_lead_in(opts)
         kind_label = opts[:kind].to_s == 'interior' ? 'interior' : 'exterior'
-        "This is an architectural #{kind_label} photograph. FURNITURE AND OBJECTS ACTUALLY PRESENT, identified by " \
-        'directly looking at Image 1 - this is ground truth from real observation, not a guess. Render exactly ' \
-        'these items as exactly these categories, nothing more, nothing fewer:'
+        "professional architectural #{kind_label} photograph of"
+      end
+
+      # SDXL 用的短提示词：关键词、逗号分隔、重要的放前面，整体尽量压在 ~60 个词以内。
+      def sdxl_prompt(opts)
+        interior = opts[:kind].to_s == 'interior'
+        kw = []
+        mats = materials_keywords(opts[:model_context])
+        kw << mats unless mats.empty?
+        kw << opts[:user_prompt].to_s.strip.tr("\n", ' ') unless opts[:user_prompt].to_s.strip.empty?
+        kw << opts[:preset_prompt].to_s.split(/[.;]/).first.to_s.strip unless opts[:preset_prompt].to_s.strip.empty?
+        kw << (interior ? 'warm interior lighting, soft daylight from windows' : 'natural daylight, real sky, real landscaping')
+        kw << 'photorealistic, physically based materials, fine surface texture, soft realistic shadows, ' \
+              'ambient occlusion, DSLR 24mm, high dynamic range, sharp focus, 8k photo'
+        kw.join(', ')
+      end
+
+      # 材质 → 关键词（取画面占比最高的几种，名字能用就用名字，否则只用物理类别）
+      def materials_keywords(ctx)
+        return '' unless ctx
+        mats = ctx[:visible_materials] || ctx['visible_materials'] || []
+        mats.first(6).map do |x|
+          name = (x[:name] || x['name']).to_s
+          next if name.start_with?('(')
+          hint = material_physics_hint(name, x[:texture_file] || x['texture_file'])
+          hint ? hint.split(':').first : nil
+        end.compact.uniq.map { |c| "real #{c}" }.join(', ')
       end
 
       def structural_prompt_body(opts, strength)
@@ -477,9 +512,14 @@ module AydinCreative
       # resolution/aspect_ratio 可选——不传就只精修不改尺寸（"上传图片增强真实感"那个独立
       # 功能用这个默认行为）；传了就在精修完之后再放大到目标分辨率（结构锁定管线两阶段的
       # 第二阶段用这个，一次做完精修+放大，见 build() 顶部注释）。
-      def build_enhance(input_filename:, strength:, resolution: nil, aspect_ratio: nil)
+      # depth_filename/canny_filename：渲染管线第二阶段会传进来——带着结构约束精修，
+      # denoise 封顶 0.32。以前第二阶段不带约束、denoise 0.45，会把第一阶段锁住的结构画走样。
+      def build_enhance(input_filename:, strength:, resolution: nil, aspect_ratio: nil,
+                        depth_filename: nil, canny_filename: nil)
         s = strength.to_i.clamp(0, 100)
         dn = (ENHANCE_DENOISE_MIN + (s / 100.0) * (ENHANCE_DENOISE_MAX - ENHANCE_DENOISE_MIN)).round(3)
+        guided = depth_filename || canny_filename
+        dn = [dn, 0.32].min if guided
         seed = rand(1..2_147_483_646)
         stamp = Time.now.strftime('%Y%m%d_%H%M%S')
 
@@ -512,6 +552,35 @@ module AydinCreative
           } },
           '7' => { 'class_type' => 'VAEDecode', 'inputs' => { 'samples' => ['6', 0], 'vae' => ['1', 2] } }
         }
+
+        if guided
+          g['2sz'] = { 'class_type' => 'GetImageSize', 'inputs' => { 'image' => ['2s', 0] } }
+          pos = ['3', 0]
+          neg = ['4', 0]
+          [[depth_filename, STRUCT_DEPTH_CN, 'depth'], [canny_filename, STRUCT_CANNY_CN, 'canny']].each do |file, cn, tag|
+            next unless file
+            b = "e_#{tag}"
+            g["#{b}_img"] = { 'class_type' => 'LoadImage', 'inputs' => { 'image' => file } }
+            g["#{b}_rs"] = { 'class_type' => 'ImageScale', 'inputs' => {
+              'image' => ["#{b}_img", 0], 'upscale_method' => 'lanczos',
+              'width' => ['2sz', 0], 'height' => ['2sz', 1], 'crop' => 'disabled'
+            } }
+            src = ["#{b}_rs", 0]
+            if tag == 'canny'
+              g["#{b}_edge"] = { 'class_type' => 'Canny', 'inputs' => { 'image' => src, 'low_threshold' => 0.15, 'high_threshold' => 0.35 } }
+              src = ["#{b}_edge", 0]
+            end
+            g["#{b}_model"] = { 'class_type' => 'ControlNetLoader', 'inputs' => { 'control_net_name' => cn } }
+            g["#{b}_apply"] = { 'class_type' => 'ControlNetApplyAdvanced', 'inputs' => {
+              'positive' => pos, 'negative' => neg, 'control_net' => ["#{b}_model", 0], 'image' => src,
+              'strength' => 0.5, 'start_percent' => 0.0, 'end_percent' => 0.8
+            } }
+            pos = ["#{b}_apply", 0]
+            neg = ["#{b}_apply", 1]
+          end
+          g['6']['inputs']['positive'] = pos
+          g['6']['inputs']['negative'] = neg
+        end
 
         last = '7'
         if resolution && aspect_ratio

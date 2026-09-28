@@ -83,3 +83,15 @@ details#analysis-box summary{cursor:pointer;color:var(--muted);font-size:12px;
 #render-btn{width:100%;padding:11px;font-size:14px;font-weight:600;background:var(--accent-2);
   border-color:var(--accent);color:#fff;margin-top:4px}
 .muted{color:var(--muted)} .tiny{font-size:11px} .muted.tiny{margin:6px 0 0}
+
+/* ---- 渲染引擎设置 ---- */
+#engine-box{background:var(--card);border:1px solid var(--line);border-radius:9px;padding:10px}
+select#engine,#engine-box input[type=text],#engine-box input[type=password]{width:100%;background:var(--panel);
+  color:var(--text);border:1px solid var(--line);border-radius:7px;padding:7px 8px;font:inherit}
+#engine-box input{margin-top:6px}
+#engine-box details{margin-top:6px}
+#engine-box details summary{cursor:pointer;color:var(--muted);font-size:12px}
+#engine-box .sub{display:block;margin-top:8px;color:var(--muted);font-size:12px}
+#cfg-actions{display:flex;align-items:center;gap:8px;margin-top:8px}
+#cfg-saved{color:var(--ok);font-size:12px}
+.key-ok{color:var(--ok)} .key-missing{color:var(--warn)}

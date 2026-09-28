@@ -48,6 +48,33 @@
       <span id="comfy-text" data-i18n="comfy_checking">检查 ComfyUI…</span>
     </div>
 
+    <div class="field" id="engine-box">
+      <label data-i18n="engine_label">渲染引擎</label>
+      <select id="engine">
+        <option value="gemini" data-i18n="engine_gemini">Nano Banana Pro（Google · 真实感最强）</option>
+        <option value="seedream" data-i18n="engine_seedream">Seedream（字节 · 火山方舟 · 国内直连）</option>
+        <option value="local" data-i18n="engine_local">本地 ComfyUI（RealVisXL · 免费离线）</option>
+      </select>
+      <div id="cloud-cfg">
+        <span class="sub" id="key-label" data-i18n="key_label">API Key</span>
+        <input type="password" id="api-key" autocomplete="off" spellcheck="false">
+        <p class="muted tiny" id="key-state"></p>
+        <label class="check"><input type="checkbox" id="auto-retry" checked> <span data-i18n="auto_retry">结构检查 + 自动择优（偏差大就重出，最多 3 张）</span></label>
+        <details>
+          <summary data-i18n="engine_advanced">高级：模型 ID / 代理</summary>
+          <span class="sub" data-i18n="model_id">模型 ID（留空＝默认）</span>
+          <input type="text" id="model-id" spellcheck="false">
+          <span class="sub" data-i18n="proxy_label">代理（访问 Google 用，例：127.0.0.1:7890）</span>
+          <input type="text" id="proxy" spellcheck="false" placeholder="127.0.0.1:7890">
+        </details>
+      </div>
+      <div id="cfg-actions">
+        <button id="save-cfg" class="small" data-i18n="save_cfg">保存设置</button>
+        <span id="cfg-saved"></span>
+      </div>
+      <p class="muted tiny" id="engine-note"></p>
+    </div>
+
     <div class="field">
       <label data-i18n="scene_type">场景类型</label>
       <div class="seg" id="kind">
@@ -110,14 +137,14 @@
     </div>
 
     <div class="field">
-      <label><span data-i18n="ai_strength">AI 强度</span> <b id="ai-val">25</b> / 100</label>
-      <input type="range" id="ai-strength" min="0" max="100" step="5" value="25">
+      <label><span data-i18n="ai_strength">AI 强度</span> <b id="ai-val">10</b> / 100</label>
+      <input type="range" id="ai-strength" min="0" max="100" step="5" value="10">
       <p class="muted tiny" data-i18n="ai_note">≈30：加配景，几乎不动建筑。≈70：地形/房屋会被改。100：几乎完全重构。</p>
     </div>
 
     <div class="field">
       <label><span data-i18n="geom_label">结构约束</span></label>
-      <p class="muted tiny" data-i18n="geom_note">深度图 + 边线图（真实 3D 数据，不是猜的）永远自动生成，作为 ControlNet 硬约束——这是"AI 强度"能保证不丢物体/不变形的原因，不需要也不能关。</p>
+      <p class="muted tiny" id="geom-note"></p>
     </div>
 
     <div class="field">
@@ -132,7 +159,7 @@
     </details>
 
     <button id="render-btn" data-i18n="render_btn">开始渲染</button>
-    <p class="muted tiny" data-i18n="render_note">RealVisXL img2img + 深度/边线双重 ControlNet 硬约束，真实数据锚定结构。约 1–3 分钟。</p>
+    <p class="muted tiny" id="render-note"></p>
   </aside>
 
 </div>
