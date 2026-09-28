@@ -52,6 +52,7 @@
       <label data-i18n="engine_label">本地渲染引擎</label>
       <div class="engine-name" data-i18n="engine_flux">Flux.2 Klein 9B</div>
       <label class="check"><input type="checkbox" id="struct-lora" checked> <span data-i18n="struct_lora">结构 LoRA（RefControl 线稿：锁住墙板线条、拱形、柜子等造型）</span></label>
+      <label class="check"><input type="checkbox" id="scene-ai" checked> <span data-i18n="scene_ai">AI 场景分析（Qwen3-VL：出图前先看懂每个构件——拱形、雕花、壁灯/吊灯、哪面墙必须留空）</span></label>
       <label class="check" id="retry-row"><input type="checkbox" id="auto-retry" checked> <span data-i18n="auto_retry">结构检查 + 自动择优（偏差大就换种子重出，最多 3 张）</span></label>
       <div id="model-status" class="muted tiny"></div>
     </div>
@@ -137,6 +138,12 @@
     <details class="field" id="analysis-box">
       <summary><span data-i18n="analysis_summary">模型信息分析</span> <button id="analyze-btn" class="ghost small" data-i18n="analyze_btn">分析当前视角</button></summary>
       <pre id="analysis" data-i18n="analysis_placeholder">点击「分析当前视角」提取材质/构件/尺寸/太阳数据。</pre>
+    </details>
+
+    <details class="field hidden" id="scene-box">
+      <summary data-i18n="scene_summary">AI 场景分析结果</summary>
+      <p class="muted tiny" data-i18n="scene_hint">这是出图前 AI 对当前视角的理解。哪里看错了，就在上面「附加描述」里写清楚（比如"右边是壁灯，不是吊灯"），再渲染一次。</p>
+      <pre id="scene-text"></pre>
     </details>
 
     <button id="render-btn" data-i18n="render_btn">开始渲染</button>

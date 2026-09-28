@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'digest'
 require 'sketchup.rb'
 
 require File.join(__dir__, 'presets')
@@ -41,7 +42,7 @@ module AydinCreative
     # ---- Ruby 侧界面文字（菜单 / 弹窗 / 保存对话框 / 错误）------------
     STRINGS = {
       'zh' => {
-        s_probe: '检查本地模型…', s_attempt: 'Flux 照片级出图（第 %d/%d 张）…', s_retry: '结构吻合度 %d%%，换种子重出…', s_upscale: '放大到目标分辨率…', s_resize: '放大到目标分辨率…',
+        s_probe: '检查本地模型…', s_scene: 'AI 场景分析：看懂每个建模构件…', s_attempt: 'Flux 照片级出图（第 %d/%d 张）…', s_retry: '结构吻合度 %d%%，换种子重出…', s_upscale: '放大到目标分辨率…', s_resize: '放大到目标分辨率…',
         s_extract: '提取模型信息…（大模型可能要几秒）', s_capture: '截取当前视角…', s_connect: '连接 ComfyUI…', s_upload: '上传结构图…', s_upref: '上传参考图…', s_build: '生成工作流…', s_submit: '提交到 ComfyUI…', s_processing: 'ComfyUI 处理中',
         menu_open: '打开渲染面板', menu_reload: '重新加载插件（开发）', menu_log: '打开日志文件夹',
         cmd_name: 'AI 渲染', cmd_tip: 'AI 渲染工作室',
@@ -53,7 +54,7 @@ module AydinCreative
         err_seealso: '（%s）— 详见 render.log', save_fail: '保存失败：'
       },
       'en' => {
-        s_probe: 'Checking local models…', s_attempt: 'Flux photoreal pass (%d/%d)…', s_retry: 'Structure match %d%%, re-rendering with a new seed…', s_upscale: 'Upscaling to target resolution…', s_resize: 'Upscaling to target resolution…',
+        s_probe: 'Checking local models…', s_scene: 'AI scene analysis: reading every modelled element…', s_attempt: 'Flux photoreal pass (%d/%d)…', s_retry: 'Structure match %d%%, re-rendering with a new seed…', s_upscale: 'Upscaling to target resolution…', s_resize: 'Upscaling to target resolution…',
         s_extract: 'Reading model info… (a few seconds on big models)', s_capture: 'Capturing the view…', s_connect: 'Connecting to ComfyUI…', s_upload: 'Uploading structure image…', s_upref: 'Uploading reference image…', s_build: 'Building workflow…', s_submit: 'Submitting to ComfyUI…', s_processing: 'ComfyUI is working',
         menu_open: 'Open render panel', menu_reload: 'Reload plugin (dev)', menu_log: 'Open log folder',
         cmd_name: 'AI Render', cmd_tip: 'AI Render Studio',
@@ -65,7 +66,7 @@ module AydinCreative
         err_seealso: '(%s) — see render.log', save_fail: 'Save failed: '
       },
       'ru' => {
-        s_probe: 'Проверка локальных моделей…', s_attempt: 'Flux фотореализм (%d/%d)…', s_retry: 'Совпадение структуры %d%%, повтор с новым seed…', s_upscale: 'Upscaling…', s_resize: 'Upscaling…',
+        s_probe: 'Проверка локальных моделей…', s_scene: 'AI-анализ сцены: разбор каждого элемента модели…', s_attempt: 'Flux фотореализм (%d/%d)…', s_retry: 'Совпадение структуры %d%%, повтор с новым seed…', s_upscale: 'Upscaling…', s_resize: 'Upscaling…',
         s_extract: 'Чтение данных модели… (несколько секунд для больших)', s_capture: 'Снимок вида…', s_connect: 'Подключение к ComfyUI…', s_upload: 'Загрузка структурного изображения…', s_upref: 'Загрузка референса…', s_build: 'Сборка воркфлоу…', s_submit: 'Отправка в ComfyUI…', s_processing: 'ComfyUI обрабатывает',
         menu_open: 'Открыть панель рендеринга', menu_reload: 'Перезагрузить плагин (разр.)', menu_log: 'Открыть папку логов',
         cmd_name: 'AI Рендер', cmd_tip: 'AI Студия рендеринга',
@@ -77,7 +78,7 @@ module AydinCreative
         err_seealso: '(%s) — см. render.log', save_fail: 'Ошибка сохранения: '
       },
       'kk' => {
-        s_probe: 'Жергілікті модельдерді тексеру…', s_attempt: 'Flux фотошынайы рендер (%d/%d)…', s_retry: 'Құрылым сәйкестігі %d%%, жаңа seed-пен қайта…', s_upscale: 'Upscaling…', s_resize: 'Upscaling…',
+        s_probe: 'Жергілікті модельдерді тексеру…', s_scene: 'AI сахна талдауы: әр модель элементін оқу…', s_attempt: 'Flux фотошынайы рендер (%d/%d)…', s_retry: 'Құрылым сәйкестігі %d%%, жаңа seed-пен қайта…', s_upscale: 'Upscaling…', s_resize: 'Upscaling…',
         s_extract: 'Модель ақпаратын оқу… (үлкен модельдерде бірнеше секунд)', s_capture: 'Көріністі түсіру…', s_connect: 'ComfyUI-ге қосылу…', s_upload: 'Құрылым суретін жүктеу…', s_upref: 'Үлгі суретті жүктеу…', s_build: 'Воркфлоу құру…', s_submit: 'ComfyUI-ге жіберу…', s_processing: 'ComfyUI жұмыс істеуде',
         menu_open: 'Рендер панелін ашу', menu_reload: 'Плагинді қайта жүктеу (әзірлеу)', menu_log: 'Журнал қалтасын ашу',
         cmd_name: 'AI Рендер', cmd_tip: 'AI Рендер студиясы',
@@ -109,14 +110,17 @@ module AydinCreative
     def load_settings
       retry_v = (Sketchup.read_default(SETTINGS_SECTION, 'cfg_auto_retry', true) rescue true)
       lora_v = (Sketchup.read_default(SETTINGS_SECTION, 'cfg_struct_lora', true) rescue true)
+      scene_v = (Sketchup.read_default(SETTINGS_SECTION, 'cfg_scene_ai', true) rescue true)
       { auto_retry: retry_v == true || retry_v.to_s == 'true',
-        struct_lora: lora_v == true || lora_v.to_s == 'true' }
+        struct_lora: lora_v == true || lora_v.to_s == 'true',
+        scene_ai: scene_v == true || scene_v.to_s == 'true' }
     end
 
     def save_settings(json)
       data = JSON.parse(json.to_s)
       Sketchup.write_default(SETTINGS_SECTION, 'cfg_auto_retry', data['auto_retry'] ? true : false) if data.key?('auto_retry')
       Sketchup.write_default(SETTINGS_SECTION, 'cfg_struct_lora', data['struct_lora'] ? true : false) if data.key?('struct_lora')
+      Sketchup.write_default(SETTINGS_SECTION, 'cfg_scene_ai', data['scene_ai'] ? true : false) if data.key?('scene_ai')
       rlog "settings saved: #{load_settings}"
       to_js('settings', load_settings)
     rescue StandardError => e
@@ -134,6 +138,7 @@ module AydinCreative
       dl = ->(list) { { count: list.size, gb: list.sum { |x| x[:gb].to_f }.round(1) } }
       to_js('models', { ok: r[:ok], missing: r[:missing], dl_required: dl.call(r[:downloads] || []),
                         struct_lora: r[:models][:struct_lora], dl_lora: (r[:lora_downloads] || []).size,
+                        scene: r[:models][:scene], scene_nodes: r[:scene_nodes], dl_scene: dl.call(r[:scene_downloads] || []),
                         downloading: Downloader.running?(WORK_DIR) })
       watch_download if Downloader.running?(WORK_DIR)
     rescue StandardError => e
@@ -144,7 +149,7 @@ module AydinCreative
     def start_download(which)
       return watch_download if Downloader.running?(WORK_DIR) # 已经在下（比如关了面板又打开）
       r = @last_resolve || FluxBuilder.resolve(ComfyClient.new)
-      items = Array(which.to_s == 'lora' ? r[:lora_downloads] : r[:downloads])
+      items = Array({ 'lora' => r[:lora_downloads], 'scene' => r[:scene_downloads] }.fetch(which.to_s, r[:downloads]))
       return to_js('download', { error: '没有需要下载的文件', done: true }) if items.empty?
       rlog "download start (#{which}): #{items.map { |x| "#{x[:folder]}/#{x[:name]}" }.join(', ')}"
       pid = Downloader.start(items, ComfyClient.new, WORK_DIR)
@@ -475,22 +480,28 @@ module AydinCreative
       vlm = client.node?('TextGenerate') && client.models('text_encoders').include?(FluxBuilder::VISION_CLIP) ? FluxBuilder::VISION_CLIP : nil
       preset_text = opts[:preset_key].to_s.empty? ? nil : Presets.text_for(opts[:mode], opts[:preset_key], opts[:kind])
       kind = opts[:kind] || 'exterior'
-      prompt = FluxBuilder.render_prompt(kind: kind, ctx: ctx, strength: strength, preset: preset_text,
-                                         user_prompt: opts[:user_prompt], has_depth: !geo[:depth].nil?,
-                                         has_normal: !geo[:normal].nil?, reference_index: ref_index,
-                                         refcontrol: !lora.nil?)
-      File.write(File.join(WORK_DIR, 'last_prompt.txt'), prompt) rescue nil
+      make_prompt = lambda do |scene|
+        FluxBuilder.render_prompt(kind: kind, ctx: ctx, strength: strength, preset: preset_text,
+                                  user_prompt: opts[:user_prompt], has_depth: !geo[:depth].nil?,
+                                  has_normal: !geo[:normal].nil?, reference_index: ref_index,
+                                  refcontrol: !lora.nil?, scene: scene)
+      end
+      # 场景分析（Qwen3-VL）：出图前先看懂这个视角，结果写进提示词。有它就不再在出图工作流里跑 gemma 识物。
+      scene_model = settings[:scene_ai] ? res[:models][:scene] : nil
+      vlm = nil if scene_model
+      rlog "  scene analysis #{scene_model ? "ON (#{scene_model})" : "off (setting=#{settings[:scene_ai]} file=#{res[:models][:scene] || 'none'} nodes=#{res[:scene_nodes]})"}"
       w, h = FluxBuilder.output_dims(Capture.aspect_value(v, @aspect), opts[:resolution])
       # 从 SketchUp 截图出发（img2img），AI 强度 → 重画比例；线稿控制图跟出图逐像素对齐
       init = lora ? 1 : 0
       denoise = FluxBuilder.denoise_for(strength)
-      rlog "  vlm=#{vlm || 'off'} images=#{images.size} ref=#{ref_index || 'none'} target=#{w}x#{h} prompt=#{prompt.size}ch"
+      rlog "  vlm=#{vlm || 'off'} images=#{images.size} ref=#{ref_index || 'none'} target=#{w}x#{h}"
       rlog "  start from SketchUp view: denoise=#{denoise} (AI #{strength}) gen=#{FluxBuilder::INIT_MP}MP"
 
       @job = {
         stage: :attempt, attempts: 0, max: settings[:auto_retry] && lin ? MAX_ATTEMPTS : 1, best: nil,
-        lines_path: lin ? lines_path : nil, user_seed: opts[:seed], w: w, h: h,
+        lines_path: lin ? lines_path : nil, user_seed: opts[:seed], w: w, h: h, make_prompt: make_prompt,
         build: lambda do |seed, tag|
+          prompt = @job[:prompt]
           # 结构 LoRA 模式下图 1 是线稿：看图识物要看图 2（SketchUp 截图），线稿按约定决定要不要反相
           FluxBuilder.build_edit(images: images, models: res[:models], prompt_text: prompt, seed: seed, tag: tag,
                                  vlm: vlm, vlm_lead: FluxBuilder.vision_lead_in(kind, lora ? 2 : 1),
@@ -498,7 +509,58 @@ module AydinCreative
                                  vlm_image: lora ? 1 : 0, init: init, denoise: denoise, match: lora ? [0] : [])
         end
       }
-      start_flux_attempt
+      if scene_model
+        start_scene_analysis(scene_model, src, lin ? lines_path : nil, kind)
+      else
+        use_scene(nil)
+        start_flux_attempt
+      end
+    end
+
+    # 场景分析结果（或 nil）→ 定下最终提示词
+    def use_scene(text)
+      job = @job
+      job[:prompt] = job[:make_prompt].call(text)
+      File.write(File.join(WORK_DIR, 'last_prompt.txt'), job[:prompt]) rescue nil
+      rlog "  prompt=#{job[:prompt].size}ch scene=#{text ? "#{text.size}ch" : 'none'}"
+    end
+
+    # 同一个视角（截图字节一样）不重复分析；换了视角或模型才重跑
+    def start_scene_analysis(model, src, lines_path, kind)
+      job = @job
+      job[:stage] = :scene
+      key = [Digest::MD5.file(src).hexdigest, lines_path && Digest::MD5.file(lines_path).hexdigest, model, kind].join(':')
+      if @scene_cache && @scene_cache[:key] == key
+        rlog '  scene analysis: same view as last time, reusing'
+        job[:stage] = :attempt
+        use_scene(@scene_cache[:text])
+        to_js('sceneAnalysis', { text: @scene_cache[:text] })
+        return start_flux_attempt
+      end
+      job[:scene_key] = key
+      client = ComfyClient.new
+      begin
+        graph = FluxBuilder.build_scene(image: client.stage_input(src), model: model, kind: kind,
+                                        lines: lines_path && client.stage_input(lines_path))
+        File.write(File.join(WORK_DIR, 'last_scene_graph.json'), JSON.pretty_generate(graph)) rescue nil
+        pid = client.queue(graph)
+      rescue StandardError => e
+        rlog "  scene analysis could not start (#{e.class}: #{e.message}) — rendering without it"
+        job[:stage] = :attempt
+        use_scene(nil)
+        return start_flux_attempt
+      end
+      rlog "  scene analysis queued #{pid}"
+      run_job(phase: 'render', note: tr(:s_scene)) do |state|
+        state[:pct] = 0.10
+        begin
+          { scene: client.wait_text(pid, timeout: 900) { |_q| state[:pct] = 0.11 } }
+        rescue StandardError => e
+          # 分析失败不耽误出图：没有分析也照常渲染
+          rlog "  scene analysis failed (#{e.class}: #{e.message}) — rendering without it"
+          { scene: nil }
+        end
+      end
     end
 
     def start_flux_attempt
@@ -520,6 +582,22 @@ module AydinCreative
     # 主线程：一个任务结束后决定下一步。返回最终结果；返回 nil 表示已经提交了下一个任务。
     def flux_job_step(image)
       job = @job
+      if job[:stage] == :scene
+        text = image.is_a?(Hash) ? image[:scene].to_s.strip : ''
+        text = text[0, 6000]
+        if text.empty?
+          text = nil
+        else
+          @scene_cache = { key: job[:scene_key], text: text }
+          File.write(File.join(WORK_DIR, 'last_scene.txt'), text) rescue nil
+          rlog "  scene analysis (#{text.size}ch): #{text[0, 400].tr("\n", ' ')}"
+          to_js('sceneAnalysis', { text: text })
+        end
+        job[:stage] = :attempt
+        use_scene(text)
+        start_flux_attempt
+        return nil
+      end
       if job[:stage] == :attempt
         score = job[:lines_path] ? GeometryCheck.score_files(job[:lines_path], image[:local]) : nil
         image[:score] = score

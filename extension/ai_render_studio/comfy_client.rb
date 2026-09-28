@@ -100,7 +100,22 @@ module AydinCreative
       end
 
       # 轮询直到出图。block 收到 0.0-1.0 进度（估算）。
-      def wait(prompt_id, timeout: 900, poll: 2.0)
+      def wait(prompt_id, timeout: 900, poll: 2.0, &progress)
+        collect_images(wait_outputs(prompt_id, timeout: timeout, poll: poll, &progress))
+      end
+
+      # 纯文字结果（场景分析：PreviewAny 节点的 ui.text）
+      def wait_text(prompt_id, timeout: 600, poll: 1.5, &progress)
+        outs = wait_outputs(prompt_id, timeout: timeout, poll: poll, &progress)
+        outs.each_value do |node_out|
+          t = Array(node_out['text']).first
+          return t.to_s if t
+        end
+        nil
+      end
+
+      # 轮询直到任务结束，返回 /history 里的 outputs
+      def wait_outputs(prompt_id, timeout: 900, poll: 2.0)
         deadline = Time.now + timeout
         loop do
           hist = history(prompt_id)
@@ -110,7 +125,7 @@ module AydinCreative
             raise "ComfyUI 执行失败: #{extract_error(entry)}" if status == 'error'
 
             outs = entry['outputs']
-            return collect_images(outs) if outs && !outs.empty?
+            return outs if outs && !outs.empty?
           end
 
           # 队列位置 → 粗略进度

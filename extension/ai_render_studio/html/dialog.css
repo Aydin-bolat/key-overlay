@@ -75,6 +75,9 @@ textarea,input[type=number],select#resolution{width:100%;background:var(--card);
   padding:3px 6px;font:inherit;font-size:12px}
 input[type=range]{width:100%}
 .check{display:flex;align-items:center;gap:6px;margin-top:8px;color:var(--muted);font-size:12px}
+details#scene-box summary{cursor:pointer;color:var(--muted);font-size:12px}
+#scene-text{background:var(--card);border:1px solid var(--line);border-radius:7px;padding:8px;
+  margin-top:8px;max-height:260px;overflow:auto;white-space:pre-wrap;font-size:11px;color:#cbd3e1}
 details#analysis-box summary{cursor:pointer;color:var(--muted);font-size:12px;
   display:flex;justify-content:space-between;align-items:center;gap:8px}
 #analysis{background:var(--card);border:1px solid var(--line);border-radius:7px;padding:8px;

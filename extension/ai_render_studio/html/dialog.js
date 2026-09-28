@@ -85,6 +85,11 @@
         $('#analysis').textContent = pretty(p);
         $('#analysis-box').open = true;
         break;
+      case 'sceneAnalysis':
+        $('#scene-text').textContent = p.text || '';
+        $('#scene-box').classList.remove('hidden');
+        $('#scene-box').open = true;
+        break;
       case 'renderProgress':
         showProgress(true);
         $('#progress-note').textContent = p.note || T('preparing');
@@ -112,6 +117,7 @@
     state.settings = s || state.settings;
     $('#auto-retry').checked = state.settings.auto_retry !== false;
     $('#struct-lora').checked = state.settings.struct_lora !== false;
+    $('#scene-ai').checked = state.settings.scene_ai !== false;
     refreshEngineUi();
   }
   function refreshEngineUi() {
@@ -127,9 +133,13 @@
       : '<span class="err">' + esc(T('models_missing')) + '</span>\n' + esc((m.missing || []).join('\n'));
     html += '\n' + (m.struct_lora ? '<span class="ok">' + esc(T('lora_ok')) + '</span>'
       : '<span class="warn">' + esc(T('lora_missing')) + '</span>');
+    if (m.scene_nodes === false) html += '\n<span class="warn">' + esc(T('scene_nodes_missing')) + '</span>';
+    else html += '\n' + (m.scene ? '<span class="ok">' + esc(T('scene_ok')) + '</span>'
+      : '<span class="warn">' + esc(T('scene_missing')) + '</span>');
     var btns = '';
     if (m.dl_required && m.dl_required.count) btns += '<button class="small" data-dl="required">' + esc(T('dl_required', { n: m.dl_required.count, gb: m.dl_required.gb })) + '</button>';
     if (m.dl_lora) btns += '<button class="small ghost" data-dl="lora">' + esc(T('dl_lora')) + '</button>';
+    if (m.dl_scene && m.dl_scene.count) btns += '<button class="small ghost" data-dl="scene">' + esc(T('dl_scene', { gb: m.dl_scene.gb })) + '</button>';
     if (btns) html += '\n<span class="dl-btns">' + btns + '</span>';
     html += '<div id="dl-progress"></div>';
     box.innerHTML = html;
@@ -150,12 +160,14 @@
       '<button class="small ghost" data-act="cancel_download">' + esc(T('cancel')) + '</button>';
   }
   function saveSettings() {
-    state.settings = { auto_retry: $('#auto-retry').checked, struct_lora: $('#struct-lora').checked };
+    state.settings = { auto_retry: $('#auto-retry').checked, struct_lora: $('#struct-lora').checked,
+      scene_ai: $('#scene-ai').checked };
     call('save_settings', JSON.stringify(state.settings));
     refreshEngineUi();
   }
   $('#auto-retry').addEventListener('change', saveSettings);
   $('#struct-lora').addEventListener('change', saveSettings);
+  $('#scene-ai').addEventListener('change', saveSettings);
 
   function resetBtn() { var b = $('#render-btn'); b.disabled = !state.comfyOnline; b.textContent = T('render_btn'); }
 

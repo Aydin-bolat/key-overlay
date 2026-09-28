@@ -54,6 +54,17 @@ module AydinCreative
       # (github.com/thedeoxen/refcontrol assets/klein-9b/lineart-01.png) 控制图是"黑底白线"，所以反相。
       LINEART_INVERT = true
 
+      # 场景分析模型（Qwen3-VL，ComfyUI 原生 TextGenerate 支持 4B/8B）：出图前先"看懂"这个视角——
+      # 空间类型、墙板/拱形/角线/雕花、每件家具灯具的造型细节、容易看错的地方、必须留空的墙面——
+      # 写成 SCENE ANALYSIS 交给 Flux。模型构件名是乱码（网格057、建E_model9948）时，Flux 只能自己猜，
+      # 这一步就是替它把"这是什么、长什么样"说清楚。16GB 显存用 fp8（bf16 的 8B 要 17GB）。
+      SCENE_MODEL = {
+        folder: 'text_encoders', rx: /qwen[-_ ]?3[-_ ]?vl/i, exclude: /32b/i,
+        name: 'qwen3vl_8b_fp8_scaled.safetensors', gb: 10.6,
+        url: 'https://huggingface.co/Comfy-Org/Qwen3-VL/resolve/main/text_encoders/qwen3vl_8b_fp8_scaled.safetensors'
+      }.freeze
+      SCENE_NODES = %w[TextGenerate PreviewAny ImageBatch].freeze
+
       FLUX_NODES = %w[ReferenceLatent CFGGuider SamplerCustomAdvanced KSamplerSelect RandomNoise
                       Flux2Scheduler EmptyFlux2LatentImage ConditioningZeroOut SplitSigmasDenoise].freeze
 
@@ -164,10 +175,96 @@ module AydinCreative
           lora_downloads << { folder: STRUCT_LORA[:folder], name: STRUCT_LORA[:name], repo: STRUCT_LORA[:repo] }
         end
 
+        # 场景分析模型（可选，推荐）
+        scene_nodes = SCENE_NODES.all? { |n| client.node?(n) }
+        m[:scene] = scene_nodes ? pick_scene(client.models(SCENE_MODEL[:folder])) : nil
+        scene_downloads = []
+        if scene_nodes && m[:scene].nil?
+          scene_downloads << { folder: SCENE_MODEL[:folder], name: SCENE_MODEL[:name], url: SCENE_MODEL[:url], gb: SCENE_MODEL[:gb] }
+        end
+
         found = {}
         SEARCH_FOLDERS.each { |fd| found[fd] = client.models(fd) }
         { ok: missing.empty?, models: m, missing: missing, downloads: downloads, lora_downloads: lora_downloads,
-          found: found }
+          scene_downloads: scene_downloads, scene_nodes: scene_nodes, found: found }
+      end
+
+      # 8B 优先于 4B；同尺寸 fp8 优先（显存放得下）
+      def pick_scene(list)
+        hits = list.select { |f| (b = base(f)) =~ SCENE_MODEL[:rx] && b !~ SCENE_MODEL[:exclude] }
+        hits.max_by do |f|
+          n = base(f).downcase
+          (n =~ /8b/ ? 10 : 0) + (n.include?('fp8') ? 2 : 0) + (n.include?('bf16') ? 0 : 1)
+        end
+      end
+
+      # ---- 场景分析：一个单独的小工作流，出图前跑一次 ------------------------------------
+      # 图 A = SketchUp 截图（颜色/材质），图 B = 消隐线线稿（每条线都是真实棱边，看清石膏线/浮雕）。
+      # 结果是纯文字，用 PreviewAny 输出，/history 里取 outputs.show.text。
+      def build_scene(image:, model:, kind:, lines: nil)
+        g = {
+          'clip' => { 'class_type' => 'CLIPLoader', 'inputs' => { 'clip_name' => model, 'type' => 'stable_diffusion', 'device' => 'default' } },
+          'img' => { 'class_type' => 'LoadImage', 'inputs' => { 'image' => image } },
+          'img_s' => { 'class_type' => 'ImageScaleToTotalPixels', 'inputs' => {
+            'image' => ['img', 0], 'upscale_method' => 'lanczos', 'megapixels' => 1.0, 'resolution_steps' => 32
+          } }
+        }
+        pic = ['img_s', 0]
+        if lines
+          g['lin'] = { 'class_type' => 'LoadImage', 'inputs' => { 'image' => lines } }
+          # ImageBatch 会把第二张缩放成跟第一张一样大
+          g['batch'] = { 'class_type' => 'ImageBatch', 'inputs' => { 'image1' => ['img_s', 0], 'image2' => ['lin', 0] } }
+          pic = ['batch', 0]
+        end
+        g['gen'] = { 'class_type' => 'TextGenerate', 'inputs' => {
+          'clip' => ['clip', 0], 'image' => pic, 'prompt' => scene_prompt(kind, !lines.nil?),
+          'max_length' => 900, 'sampling_mode' => 'off', 'thinking' => false
+        } }
+        g['show'] = { 'class_type' => 'PreviewAny', 'inputs' => { 'source' => ['gen', 0] } }
+        g
+      end
+
+      def scene_prompt(kind, with_lines)
+        interior = kind.to_s == 'interior'
+        images =
+          if with_lines
+            'The first image is the SketchUp view (flat colours, no real lighting). The second image is a line ' \
+            'drawing of exactly the same view in which every line is a real modelled edge - use it to see ' \
+            'mouldings, reliefs, arches, carvings and panel divisions that are faint in the first image.'
+          else
+            'The image is the SketchUp view (flat colours, no real lighting).'
+          end
+        arch =
+          if interior
+            'every modelled wall, ceiling and floor feature and where it is - wall panel mouldings (how many ' \
+            'panels, rectangular or arched tops), arches and niches, cornices, ceiling roses and carved ' \
+            'ornaments, columns, skirting, doors, windows, curtains.'
+          else
+            'every modelled building feature and where it is - massing and number of storeys, roof shape, facade ' \
+            'divisions, windows and doors, balconies, railings, columns, cladding changes, paving, landscaping.'
+          end
+        "You are the scene analyst for a photorealistic renderer that must turn this SketchUp 3D model view " \
+        "into a photograph WITHOUT changing anything. The renderer often misreads modelled details, so describe " \
+        "exactly what is modelled. #{images}\n" \
+        "Write plain English, no markdown, using these sections:\n" \
+        "SPACE: what kind of #{interior ? 'room' : 'building and site'} this is and its style, in one line.\n" \
+        "ARCHITECTURE: #{arch}\n" \
+        'OBJECTS: one line per furniture piece, light fixture and decoration, from left to right: what it is, ' \
+        'where it is in the frame, its shape details (tufting, quilting, carved or relief patterns, legs, ' \
+        'handles, number of parts), its colour and the material it looks like. For every light say whether it is ' \
+        "wall-mounted, hanging from the ceiling, on a table or standing on the floor.\n" \
+        'EASY TO MISREAD: modelled details a renderer could get wrong, and how they really are (for example: one ' \
+        "continuous headboard, not two; a relief carved into a cabinet front; a wall sconce, not a pendant).\n" \
+        'EMPTY: plain surfaces that must stay empty - nothing may be added there (no artwork, shelves or ' \
+        "objects).\n" \
+        'Only describe what is really in the images. Never guess or invent.'
+      end
+
+      # 渲染提示词里的 SCENE ANALYSIS 段
+      def scene_block(text, image_no)
+        "SCENE ANALYSIS - a vision model studied Image #{image_no} and the line drawing of the 3D model in detail. " \
+        "This is how every modelled element must be understood and rendered; follow it exactly, it overrides any " \
+        "guess, and add nothing that it does not list:\n#{text}"
       end
 
       def loader_nodes(models)
@@ -349,7 +446,7 @@ module AydinCreative
 
       # refcontrol: 结构 LoRA 模式——图 1 = 线稿(控制图)，图 2 = SketchUp 截图(参考图)，触发词放最前面
       def render_prompt(kind:, ctx:, strength:, preset: nil, user_prompt: nil, has_depth: false, has_normal: false,
-                        reference_index: nil, refcontrol: false)
+                        reference_index: nil, refcontrol: false, scene: nil)
         parts = []
         if refcontrol
           parts << 'refcontrol. Image 1 is a line drawing of the exact 3D model from this camera: every line is a real ' \
@@ -361,6 +458,7 @@ module AydinCreative
         else
           parts << image_roles(has_depth, has_normal)
         end
+        parts << scene_block(scene, refcontrol ? 2 : 1) unless scene.to_s.strip.empty?
         append_prompt_body(parts, kind: kind, ctx: ctx, strength: strength, preset: preset, user_prompt: user_prompt,
                                   reference_index: reference_index)
       end
@@ -381,7 +479,7 @@ module AydinCreative
       end
 
       def append_prompt_body(parts, kind:, ctx:, strength:, preset:, user_prompt:, reference_index:)
-        parts << ground_truth_block(ctx)
+        parts << ground_truth_block(ctx, kind)
         parts << strength_directive(strength)
         if reference_index
           parts << "Image #{reference_index} is a reference photo. " + reference_directive(strength)
@@ -519,7 +617,7 @@ module AydinCreative
         hit && hit[1]
       end
 
-      def ground_truth_block(ctx)
+      def ground_truth_block(ctx, kind = nil)
         return 'GROUND TRUTH: (no 3D model data available for this view.)' if ctx.nil?
 
         lines = []
@@ -622,6 +720,16 @@ module AydinCreative
 
         lines << ''
         lines << 'HOW TO READ THIS SKETCHUP IMAGE (critical):'
+        # 室内：平涂颜色就是设计师选的颜色，只缺纹理和光影——原来那句"平涂都是占位色，换成合理材质"
+        # 是写给室外总图的，用在室内会让 Flux 把米色床头、墙面换成它自己挑的颜色/材质。
+        if kind.to_s == 'interior'
+          lines << 'Every surface colour in the SketchUp view is the designer\'s chosen colour - keep it. Flat, unshaded ' \
+                   'fills only lack texture and lighting: add realistic texture, finish and light in the SAME colour, ' \
+                   'never swap a colour or material for a different one. ' \
+                   'The SketchUp model has NO edge lines in this image; do not draw black outlines, cartoon contours or sketch strokes on anything. ' \
+                   'The final image must look like a real photograph taken on site, not a 3D model, not a clay render, not an illustration.'
+          return lines.join("\n")
+        end
         lines << 'Flat, uniform, unshaded colour fills in the image are placeholders that encode FUNCTION, not final appearance. ' \
                  'Bright yellow / orange flat areas = paved pedestrian paths, walkways or roads — render them as realistic paving ' \
                  '(stone, concrete pavers, gravel or asphalt as fits the scene), NEVER leave them yellow. ' \
