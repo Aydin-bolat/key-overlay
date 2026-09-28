@@ -17,7 +17,7 @@ module AydinCreative
       }.freeze
 
       SNAPSHOT_LONG_EDGE = 1280
-      SOURCE_LONG_EDGE   = 1400
+      SOURCE_LONG_EDGE   = 2048   # 截图 ≈2.4MP：Flux 按 2MP 出图，石膏线、拱形这种细线在截图里要有足够像素
 
       LOG_PATH = File.join(ENV['TEMP'] || Dir.tmpdir, 'ai_render_studio', 'render.log')
 

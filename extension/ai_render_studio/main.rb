@@ -481,7 +481,11 @@ module AydinCreative
                                          refcontrol: !lora.nil?)
       File.write(File.join(WORK_DIR, 'last_prompt.txt'), prompt) rescue nil
       w, h = FluxBuilder.output_dims(Capture.aspect_value(v, @aspect), opts[:resolution])
+      # 从 SketchUp 截图出发（img2img），AI 强度 → 重画比例；线稿控制图跟出图逐像素对齐
+      init = lora ? 1 : 0
+      denoise = FluxBuilder.denoise_for(strength)
       rlog "  vlm=#{vlm || 'off'} images=#{images.size} ref=#{ref_index || 'none'} target=#{w}x#{h} prompt=#{prompt.size}ch"
+      rlog "  start from SketchUp view: denoise=#{denoise} (AI #{strength}) gen=#{FluxBuilder::INIT_MP}MP"
 
       @job = {
         stage: :attempt, attempts: 0, max: settings[:auto_retry] && lin ? MAX_ATTEMPTS : 1, best: nil,
@@ -491,7 +495,7 @@ module AydinCreative
           FluxBuilder.build_edit(images: images, models: res[:models], prompt_text: prompt, seed: seed, tag: tag,
                                  vlm: vlm, vlm_lead: FluxBuilder.vision_lead_in(kind, lora ? 2 : 1),
                                  lora: lora, invert: lora && FluxBuilder::LINEART_INVERT ? [0] : [],
-                                 vlm_image: lora ? 1 : 0)
+                                 vlm_image: lora ? 1 : 0, init: init, denoise: denoise, match: lora ? [0] : [])
         end
       }
       start_flux_attempt
