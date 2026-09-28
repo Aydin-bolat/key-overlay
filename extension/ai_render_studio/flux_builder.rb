@@ -39,6 +39,21 @@ module AydinCreative
       EXCLUDE = { unet: /lora|vae|control/i }.freeze
       SIZE_GB = { unet: 9.4, clip: 8.7, vae: 0.3 }.freeze
       SEARCH_FOLDERS = %w[diffusion_models unet_gguf checkpoints text_encoders clip_gguf vae loras].freeze
+      # 结构 LoRA（RefControl，Flux.2 Klein 9B 线稿版）：让 Klein 把线稿当"必须照着画的结构"，
+      # 而不只是软参考——解决墙板线条/拱形/柜子造型被 Flux 自己重新设计的问题。
+      # 用法（作者 README）：图 1 = 控制图（线稿），图 2 = 参考图（材质/颜色/物体从这里取），
+      # 提示词带触发词 "refcontrol"，LoRA 权重 0.8-1.0。在 Klein Base 上训练，作者说蒸馏 4 步版也能用。
+      # HF 仓库里的文件名没法事先确定，下载时由脚本问 HF API 找 .safetensors，存成固定文件名。
+      STRUCT_LORA = {
+        folder: 'loras', rx: /refcontrol.*line\s*art|refcontrol.*lineart|line\s*art.*refcontrol/i,
+        name: 'refcontrol-flux2-klein-9b-lineart.safetensors',
+        repo: 'thedeoxen/refcontrol-FLUX.2-klein-9B-reference-lineart-lora'
+      }.freeze
+      STRUCT_LORA_STRENGTH = 0.9
+      # 线稿颜色约定：SketchUp 消隐线截图是"白底黑线"，而 RefControl 作者给的 Klein 9B 线稿示例
+      # (github.com/thedeoxen/refcontrol assets/klein-9b/lineart-01.png) 控制图是"黑底白线"，所以反相。
+      LINEART_INVERT = true
+
       FLUX_NODES = %w[ReferenceLatent CFGGuider SamplerCustomAdvanced KSamplerSelect RandomNoise
                       Flux2Scheduler EmptyFlux2LatentImage ConditioningZeroOut].freeze
 
@@ -140,9 +155,19 @@ module AydinCreative
           next unless found_elsewhere(client, rx, folder, EXCLUDE[key]).empty?
           downloads << { folder: folder, name: name, url: url, gb: SIZE_GB[key] }
         end
+
+        # 结构 LoRA（可选）
+        lora_ok = client.node?('LoraLoaderModelOnly')
+        m[:struct_lora] = lora_ok ? pick(client.models(STRUCT_LORA[:folder]), STRUCT_LORA[:rx]) : nil
+        lora_downloads = []
+        if lora_ok && m[:struct_lora].nil?
+          lora_downloads << { folder: STRUCT_LORA[:folder], name: STRUCT_LORA[:name], repo: STRUCT_LORA[:repo] }
+        end
+
         found = {}
         SEARCH_FOLDERS.each { |fd| found[fd] = client.models(fd) }
-        { ok: missing.empty?, models: m, missing: missing, downloads: downloads, found: found }
+        { ok: missing.empty?, models: m, missing: missing, downloads: downloads, lora_downloads: lora_downloads,
+          found: found }
       end
 
       def loader_nodes(models)
@@ -164,19 +189,34 @@ module AydinCreative
 
       # final_size: [w, h] 时在同一张图里直接放大到这个尺寸（结果窗口的调色/增强用；渲染管线是
       # 先出几张 1MP 择优，再单独 build_upscale）
-      def build_edit(images:, models:, prompt_text:, seed:, tag:, vlm: nil, vlm_lead: nil, final_size: nil, esrgan: nil)
+      # lora: 结构 LoRA 文件名（有就挂在主模型上，权重 STRUCT_LORA_STRENGTH）
+      # invert: 需要反相的图片下标（线稿颜色约定，见 LINEART_INVERT）
+      # vlm_image: 看图识物看哪张图（结构 LoRA 模式下图 1 是线稿，要看图 2 的 SketchUp 截图）
+      def build_edit(images:, models:, prompt_text:, seed:, tag:, vlm: nil, vlm_lead: nil, final_size: nil, esrgan: nil,
+                     lora: nil, invert: [], vlm_image: 0)
         stamp = Time.now.strftime('%Y%m%d_%H%M%S')
         g = loader_nodes(models)
         model = ['unet', 0]
+        if lora
+          g['lora'] = { 'class_type' => 'LoraLoaderModelOnly', 'inputs' => {
+            'model' => model, 'lora_name' => lora, 'strength_model' => STRUCT_LORA_STRENGTH
+          } }
+          model = ['lora', 0]
+        end
         if models[:kv]
-          g['kv'] = { 'class_type' => 'FluxKVCache', 'inputs' => { 'model' => ['unet', 0] } }
+          g['kv'] = { 'class_type' => 'FluxKVCache', 'inputs' => { 'model' => model } }
           model = ['kv', 0]
         end
 
         images.each_with_index do |name, i|
           g["img#{i}"] = { 'class_type' => 'LoadImage', 'inputs' => { 'image' => name } }
+          src = ["img#{i}", 0]
+          if invert.include?(i)
+            g["img#{i}_inv"] = { 'class_type' => 'ImageInvert', 'inputs' => { 'image' => src } }
+            src = ["img#{i}_inv", 0]
+          end
           g["img#{i}_s"] = { 'class_type' => 'ImageScaleToTotalPixels', 'inputs' => {
-            'image' => ["img#{i}", 0], 'upscale_method' => 'lanczos', 'megapixels' => 1.0, 'resolution_steps' => 16
+            'image' => src, 'upscale_method' => 'lanczos', 'megapixels' => 1.0, 'resolution_steps' => 16
           } }
         end
         g['sz'] = { 'class_type' => 'GetImageSize', 'inputs' => { 'image' => ['img0_s', 0] } }
@@ -185,7 +225,7 @@ module AydinCreative
         if vlm
           g['vclip'] = { 'class_type' => 'CLIPLoader', 'inputs' => { 'clip_name' => vlm, 'type' => 'ltxv' } }
           g['vlm'] = { 'class_type' => 'TextGenerate', 'inputs' => {
-            'clip' => ['vclip', 0], 'image' => ['img0_s', 0], 'prompt' => vision_checklist_prompt,
+            'clip' => ['vclip', 0], 'image' => ["img#{vlm_image}_s", 0], 'prompt' => vision_checklist_prompt,
             'max_length' => 150, 'sampling_mode' => 'off'
           } }
           g['vlm_a'] = { 'class_type' => 'StringConcatenate', 'inputs' => {
@@ -261,17 +301,31 @@ module AydinCreative
       end
 
       # ---- 提示词 ------------------------------------------------------------------
-      def vision_lead_in(kind)
+      def vision_lead_in(kind, image_no = 1)
         kind_label = kind.to_s == 'interior' ? 'interior' : 'exterior'
         "This is an architectural #{kind_label} photograph. FURNITURE AND OBJECTS ACTUALLY PRESENT, identified by " \
-        'directly looking at Image 1 - this is ground truth from real observation, not a guess. Render exactly ' \
+        "directly looking at Image #{image_no} - this is ground truth from real observation, not a guess. Render exactly " \
         'these items as exactly these categories, nothing more, nothing fewer:'
       end
 
-      # images_desc: 各参考图是什么（顺序跟 build_edit 的 images 一致）
+      # refcontrol: 结构 LoRA 模式——图 1 = 线稿(控制图)，图 2 = SketchUp 截图(参考图)，触发词放最前面
       def render_prompt(kind:, ctx:, strength:, preset: nil, user_prompt: nil, has_depth: false, has_normal: false,
-                        reference_index: nil)
+                        reference_index: nil, refcontrol: false)
         parts = []
+        if refcontrol
+          parts << 'refcontrol. Image 1 is a line drawing of the exact 3D model from this camera: every line is a real ' \
+                   'edge - walls, wall panel mouldings, arches, cornices, ceiling ornaments, furniture outlines and ' \
+                   'details. Follow its structure, proportions and every line exactly. Image 2 is the SketchUp view of ' \
+                   'the same scene: take every object, its colours and its materials from Image 2, and turn it into a ' \
+                   'real photograph.'
+        else
+          parts << image_roles(has_depth, has_normal)
+        end
+        append_prompt_body(parts, kind: kind, ctx: ctx, strength: strength, preset: preset, user_prompt: user_prompt,
+                                  reference_index: reference_index)
+      end
+
+      def image_roles(has_depth, has_normal)
         idx = 2
         refs = ['Image 1 is the SketchUp 3D-model view to turn into a real photograph.']
         if has_depth
@@ -283,7 +337,10 @@ module AydinCreative
           idx += 1
         end
         refs << 'Use the depth/normal maps only as spatial guides for the exact shape, size and position of every object - never copy their colours.' if has_depth || has_normal
-        parts << refs.join(' ')
+        refs.join(' ')
+      end
+
+      def append_prompt_body(parts, kind:, ctx:, strength:, preset:, user_prompt:, reference_index:)
         parts << ground_truth_block(ctx)
         parts << strength_directive(strength)
         if reference_index

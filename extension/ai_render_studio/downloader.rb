@@ -35,7 +35,7 @@ module AydinCreative
         jobs = items.map do |it|
           dir = target_dir(paths, it[:folder])
           raise "ComfyUI 里没有 #{it[:folder]} 这个模型文件夹，请把 ComfyUI 更新到最新版" unless dir
-          { folder: it[:folder], name: it[:name], url: it[:url], dest: File.join(dir, it[:name]) }
+          { folder: it[:folder], name: it[:name], url: it[:url], repo: it[:repo], dest: File.join(dir, it[:name]) }
         end
 
         status = status_path(work_dir)
@@ -146,7 +146,8 @@ module AydinCreative
       # 兼容 Windows PowerShell 5.1（不用 ?: / ?? / && 这些 7.x 语法）
       def script(jobs, status, cancel, log, run)
         items = jobs.map do |j|
-          "  @{ folder = #{ps_str(j[:folder])}; name = #{ps_str(j[:name])}; url = #{ps_str(j[:url])}; dest = #{ps_str(j[:dest])} }"
+          "  @{ folder = #{ps_str(j[:folder])}; name = #{ps_str(j[:name])}; url = #{ps_str(j[:url])}; " \
+            "repo = #{ps_str(j[:repo])}; dest = #{ps_str(j[:dest])} }"
         end.join(",\n")
 
         <<~PS
@@ -199,6 +200,17 @@ module AydinCreative
             return ([int]("0" + ($code -replace '[^0-9]', ''))) -in 200..399
           }
 
+          function Resolve-RepoFile($h, $repo) {
+            try {
+              $json = & curl.exe @Common -s --max-time 30 ('https://' + $h + '/api/models/' + $repo) 2>$null
+              $info = ($json -join '') | ConvertFrom-Json
+              $files = @($info.siblings | ForEach-Object { $_.rfilename } | Where-Object { $_ -like '*.safetensors' })
+              if ($files.Count -eq 0) { return $null }
+              Log ('repo ' + $repo + ' files: ' + ($files -join ', '))
+              return 'https://' + $h + '/' + $repo + '/resolve/main/' + $files[0]
+            } catch { return $null }
+          }
+
           function Get-Size($url) {
             $lines = & curl.exe @Common -s -I --max-time 40 $url 2>$null
             $linked = 0; $len = 0
@@ -226,7 +238,13 @@ module AydinCreative
             $St.part = $part
             $ok = $false
             foreach ($h in $Hosts) {
-              $url = $it.url.Replace('huggingface.co', $h)
+              if ($it.repo) {
+                # 只知道仓库名（比如 LoRA）：问 HF API 这个仓库里有哪些 .safetensors，取第一个
+                $url = Resolve-RepoFile $h $it.repo
+                if (-not $url) { Log ('no .safetensors found in ' + $it.repo + ' on ' + $h); continue }
+              } else {
+                $url = $it.url.Replace('huggingface.co', $h)
+              }
               $St.host = $h; $St.total = Get-Size $url; Save-Status
               Log ('GET ' + $url + '  total=' + $St.total)
               $out = & curl.exe @Common -C - -sS -o $part $url 2>&1

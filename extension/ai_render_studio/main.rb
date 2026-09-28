@@ -108,12 +108,15 @@ module AydinCreative
 
     def load_settings
       retry_v = (Sketchup.read_default(SETTINGS_SECTION, 'cfg_auto_retry', true) rescue true)
-      { auto_retry: retry_v == true || retry_v.to_s == 'true' }
+      lora_v = (Sketchup.read_default(SETTINGS_SECTION, 'cfg_struct_lora', true) rescue true)
+      { auto_retry: retry_v == true || retry_v.to_s == 'true',
+        struct_lora: lora_v == true || lora_v.to_s == 'true' }
     end
 
     def save_settings(json)
       data = JSON.parse(json.to_s)
       Sketchup.write_default(SETTINGS_SECTION, 'cfg_auto_retry', data['auto_retry'] ? true : false) if data.key?('auto_retry')
+      Sketchup.write_default(SETTINGS_SECTION, 'cfg_struct_lora', data['struct_lora'] ? true : false) if data.key?('struct_lora')
       rlog "settings saved: #{load_settings}"
       to_js('settings', load_settings)
     rescue StandardError => e
@@ -130,6 +133,7 @@ module AydinCreative
       @last_resolve = r
       dl = ->(list) { { count: list.size, gb: list.sum { |x| x[:gb].to_f }.round(1) } }
       to_js('models', { ok: r[:ok], missing: r[:missing], dl_required: dl.call(r[:downloads] || []),
+                        struct_lora: r[:models][:struct_lora], dl_lora: (r[:lora_downloads] || []).size,
                         downloading: Downloader.running?(WORK_DIR) })
       watch_download if Downloader.running?(WORK_DIR)
     rescue StandardError => e
@@ -140,8 +144,7 @@ module AydinCreative
     def start_download(which)
       return watch_download if Downloader.running?(WORK_DIR) # 已经在下（比如关了面板又打开）
       r = @last_resolve || FluxBuilder.resolve(ComfyClient.new)
-      items = Array(r[:downloads])
-      _ = which
+      items = Array(which.to_s == 'lora' ? r[:lora_downloads] : r[:downloads])
       return to_js('download', { error: '没有需要下载的文件', done: true }) if items.empty?
       rlog "download start (#{which}): #{items.map { |x| "#{x[:folder]}/#{x[:name]}" }.join(', ')}"
       pid = Downloader.start(items, ComfyClient.new, WORK_DIR)
@@ -428,18 +431,31 @@ module AydinCreative
       rlog "  src #{File.size(src)} bytes #{cap[:w]}x#{cap[:h]}"
       @last_source_path = src
 
-      # 深度图 + 法线图：真实 3D 模型射线采样（测速自适应，不会卡住 SketchUp）
-      depth_path = File.join(WORK_DIR, "depth_#{stamp}.png")
-      normal_path = File.join(WORK_DIR, "normal_#{stamp}.png")
-      geo = (Capture.geometry_maps(v, depth_path, normal_path, aspect: @aspect) rescue { depth: nil, normal: nil })
-      rlog "  geometry_maps depth=#{geo[:depth] ? 'ok' : 'skipped'} normal=#{geo[:normal] ? 'ok' : 'skipped'}"
-      # 线稿只给结构吻合度检查用
+      # 线稿：SketchUp 消隐线模式（白面 + 黑细线，跟材质颜色无关）。结构吻合度检查一直用它；
+      # 开了结构 LoRA 时它还是图 1（控制图）。
       lines_path = File.join(WORK_DIR, "lines_#{stamp}.png")
       lin = (Capture.lines(v, lines_path, aspect: @aspect, clean: true) rescue nil)
       rlog "  lines #{lin ? "ok clean=#{lin[:clean]}" : 'skipped'}"
 
+      # 结构 LoRA 模式（RefControl）：图 1 = 线稿，图 2 = SketchUp 截图。只在线稿是真正的消隐线时才用
+      # （退回"色块+黑线"的旧线稿不是 LoRA 训练时见过的线稿）。
+      lora = settings[:struct_lora] && lin && lin[:clean] ? res[:models][:struct_lora] : nil
+      rlog "  struct LoRA #{lora ? "ON (#{lora})" : "off (setting=#{settings[:struct_lora]} file=#{res[:models][:struct_lora] || 'none'} clean=#{lin && lin[:clean]})"}"
+
+      # 深度图 + 法线图：真实 3D 模型射线采样（测速自适应，不会卡住 SketchUp）。
+      # 结构 LoRA 模式按 RefControl 的约定只喂"控制图 + 参考图"两张，不再加深度/法线。
+      geo = { depth: nil, normal: nil }
+      unless lora
+        depth_path = File.join(WORK_DIR, "depth_#{stamp}.png")
+        normal_path = File.join(WORK_DIR, "normal_#{stamp}.png")
+        geo = (Capture.geometry_maps(v, depth_path, normal_path, aspect: @aspect) rescue { depth: nil, normal: nil })
+        rlog "  geometry_maps depth=#{geo[:depth] ? 'ok' : 'skipped'} normal=#{geo[:normal] ? 'ok' : 'skipped'}"
+      end
+
       images = step(tr(:s_upload), 0.10) do
-        list = [client.stage_input(src)]
+        list = []
+        list << client.stage_input(lines_path) if lora
+        list << client.stage_input(src)
         list << client.stage_input(depth_path) if geo[:depth]
         list << client.stage_input(normal_path) if geo[:normal]
         list
@@ -458,7 +474,8 @@ module AydinCreative
       kind = opts[:kind] || 'exterior'
       prompt = FluxBuilder.render_prompt(kind: kind, ctx: ctx, strength: strength, preset: preset_text,
                                          user_prompt: opts[:user_prompt], has_depth: !geo[:depth].nil?,
-                                         has_normal: !geo[:normal].nil?, reference_index: ref_index)
+                                         has_normal: !geo[:normal].nil?, reference_index: ref_index,
+                                         refcontrol: !lora.nil?)
       File.write(File.join(WORK_DIR, 'last_prompt.txt'), prompt) rescue nil
       w, h = FluxBuilder.output_dims(Capture.aspect_value(v, @aspect), opts[:resolution])
       rlog "  vlm=#{vlm || 'off'} images=#{images.size} ref=#{ref_index || 'none'} target=#{w}x#{h} prompt=#{prompt.size}ch"
@@ -467,8 +484,11 @@ module AydinCreative
         stage: :attempt, attempts: 0, max: settings[:auto_retry] && lin ? MAX_ATTEMPTS : 1, best: nil,
         lines_path: lin ? lines_path : nil, user_seed: opts[:seed], w: w, h: h,
         build: lambda do |seed, tag|
+          # 结构 LoRA 模式下图 1 是线稿：看图识物要看图 2（SketchUp 截图），线稿按约定决定要不要反相
           FluxBuilder.build_edit(images: images, models: res[:models], prompt_text: prompt, seed: seed, tag: tag,
-                                 vlm: vlm, vlm_lead: FluxBuilder.vision_lead_in(kind))
+                                 vlm: vlm, vlm_lead: FluxBuilder.vision_lead_in(kind, lora ? 2 : 1),
+                                 lora: lora, invert: lora && FluxBuilder::LINEART_INVERT ? [0] : [],
+                                 vlm_image: lora ? 1 : 0)
         end
       }
       start_flux_attempt

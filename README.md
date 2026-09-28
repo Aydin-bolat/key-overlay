@@ -14,6 +14,16 @@ SketchUp 一键 AI 照片级渲染，全部在本地 ComfyUI 里运行，不用�
 5. **结构吻合度检查**：出图后用 SketchUp 线稿给结果打分，偏差大就自动换种子重出，最多 3 张，留分数最高的（面板上可关）；
 6. 最好那张放大到目标分辨率（ESRGAN + lanczos）。
 
+### 结构 LoRA（RefControl 线稿，可选，推荐）
+
+Flux 只拿截图当"软参考"时，墙板线条、拱形、柜子造型会被它自己重新设计。装上 [RefControl FLUX.2 Klein 9B 线稿 LoRA](https://huggingface.co/thedeoxen/refcontrol-FLUX.2-klein-9B-reference-lineart-lora) 后（面板里「下载结构 LoRA」一键下载，存为 `loras/refcontrol-flux2-klein-9b-lineart.safetensors`）：
+
+- 图 1 = SketchUp 消隐线模式截的线稿（白面 + 黑细线，跟材质颜色无关）= 控制图；
+- 图 2 = SketchUp 截图 = 参考图（物体、颜色、材质从这里取）；
+- 提示词带触发词 `refcontrol`，LoRA 权重 0.9（作者推荐 0.8–1.0）。
+
+这个模式下按 RefControl 的约定只喂这两张图，不再加深度图/法线图。面板上可以随时关掉结构 LoRA 做对比。
+
 节点接法照 ComfyUI 官方模板 `image_flux2_klein_9b_kv_image_edit`（ReferenceLatent、FluxKVCache、CFGGuider cfg 1、euler、Flux2Scheduler 4 步）。提示词各段是最初写给 Flux 的原文。
 
 结果窗口的「AI 调色」「上传图片增强真实感」也用 Flux.2 Klein 图像编辑。

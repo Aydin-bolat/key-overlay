@@ -111,6 +111,7 @@
   function applySettings(s) {
     state.settings = s || state.settings;
     $('#auto-retry').checked = state.settings.auto_retry !== false;
+    $('#struct-lora').checked = state.settings.struct_lora !== false;
     refreshEngineUi();
   }
   function refreshEngineUi() {
@@ -124,8 +125,11 @@
     if (!m) { box.innerHTML = ''; return; }
     var html = m.ok ? '<span class="ok">' + esc(T('models_ok')) + '</span>'
       : '<span class="err">' + esc(T('models_missing')) + '</span>\n' + esc((m.missing || []).join('\n'));
+    html += '\n' + (m.struct_lora ? '<span class="ok">' + esc(T('lora_ok')) + '</span>'
+      : '<span class="warn">' + esc(T('lora_missing')) + '</span>');
     var btns = '';
     if (m.dl_required && m.dl_required.count) btns += '<button class="small" data-dl="required">' + esc(T('dl_required', { n: m.dl_required.count, gb: m.dl_required.gb })) + '</button>';
+    if (m.dl_lora) btns += '<button class="small ghost" data-dl="lora">' + esc(T('dl_lora')) + '</button>';
     if (btns) html += '\n<span class="dl-btns">' + btns + '</span>';
     html += '<div id="dl-progress"></div>';
     box.innerHTML = html;
@@ -146,11 +150,12 @@
       '<button class="small ghost" data-act="cancel_download">' + esc(T('cancel')) + '</button>';
   }
   function saveSettings() {
-    state.settings = { auto_retry: $('#auto-retry').checked };
+    state.settings = { auto_retry: $('#auto-retry').checked, struct_lora: $('#struct-lora').checked };
     call('save_settings', JSON.stringify(state.settings));
     refreshEngineUi();
   }
   $('#auto-retry').addEventListener('change', saveSettings);
+  $('#struct-lora').addEventListener('change', saveSettings);
 
   function resetBtn() { var b = $('#render-btn'); b.disabled = !state.comfyOnline; b.textContent = T('render_btn'); }
 
