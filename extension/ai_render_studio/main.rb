@@ -136,35 +136,40 @@ module AydinCreative
       dl = ->(list) { { count: list.size, gb: list.sum { |x| x[:gb].to_f }.round(1) } }
       to_js('models', { ok: r[:ok], missing: r[:missing], seedvr: !r[:seedvr].nil?, seedvr_hint: PhotoBuilder.seedvr_hint,
                         dl_required: dl.call(r[:downloads] || []), dl_seedvr: dl.call(r[:seedvr_downloads] || []),
-                        downloading: !@download.nil? && @download[:active] })
+                        downloading: Downloader.running?(WORK_DIR) })
+      watch_download if Downloader.running?(WORK_DIR)
     rescue StandardError => e
       rlog "push_model_status ERROR: #{e.class}: #{e.message}"
     end
 
     # ---- 一键下载缺失模型 ----
     def start_download(which)
-      return if @download && @download[:active]
+      return watch_download if Downloader.running?(WORK_DIR) # 已经在下（比如关了面板又打开）
       r = @last_resolve || PhotoBuilder.resolve(ComfyClient.new)
-      items = which.to_s == 'seedvr' ? r[:seedvr_downloads] : r[:downloads]
-      items = Array(items)
+      items = Array(which.to_s == 'seedvr' ? r[:seedvr_downloads] : r[:downloads])
       return to_js('download', { error: '没有需要下载的文件', done: true }) if items.empty?
-      log = File.join(WORK_DIR, 'download.log')
       rlog "download start (#{which}): #{items.map { |x| "#{x[:folder]}/#{x[:name]}" }.join(', ')}"
-      @download = Downloader.start(items, ComfyClient.new, log)
-      UI.stop_timer(@download_timer) if @download_timer
-      @download_timer = UI.start_timer(1.0, true) do
-        st = @download
-        snap = Downloader.snapshot(st)
-        to_js('download', snap)
-        next unless st[:done]
-        UI.stop_timer(@download_timer)
-        @download_timer = nil
-        rlog "download finished error=#{st[:error].inspect} files=#{st[:finished]}"
-        push_model_status # ComfyUI 按目录修改时间刷新文件列表，下完不用重启
-      end
+      pid = Downloader.start(items, ComfyClient.new, WORK_DIR)
+      rlog "  download process pid=#{pid}"
+      watch_download
     rescue StandardError => e
       rlog "start_download ERROR: #{e.class}: #{e.message}"
       to_js('download', { error: e.message, done: true })
+    end
+
+    # 下载在独立进程里跑；这里只是每秒读一次它的进度文件推给面板
+    def watch_download
+      return if @download_timer
+      @download_timer = UI.start_timer(1.0, true) do
+        snap = Downloader.snapshot(WORK_DIR)
+        to_js('download', snap)
+        if snap[:done]
+          UI.stop_timer(@download_timer)
+          @download_timer = nil
+          rlog "download finished: #{snap}"
+          push_model_status # ComfyUI 按目录修改时间刷新文件列表，下完不用重启
+        end
+      end
     end
 
     # 找不到模型时，把 ComfyUI 各模型文件夹里实际有什么全部写进 render.log，方便对照排查
@@ -213,7 +218,7 @@ module AydinCreative
       dlg.add_action_callback('log')              { |_c, m| rlog "[js] #{m}" }
       dlg.add_action_callback('save_settings')    { |_c, json| save_settings(json) }
       dlg.add_action_callback('download_models')  { |_c, which| start_download(which) }
-      dlg.add_action_callback('cancel_download')  { |_c| Downloader.cancel(@download) }
+      dlg.add_action_callback('cancel_download')  { |_c| Downloader.cancel(WORK_DIR) }
     end
 
     def on_ready
