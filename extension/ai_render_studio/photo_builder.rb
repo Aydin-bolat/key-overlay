@@ -23,17 +23,30 @@ module AydinCreative
       module_function
 
       # ---- 模型文件自动识别 ---------------------------------------------------
-      # 不写死文件名：去 ComfyUI 的模型目录里按关键字找，找不到就明确告诉用户缺什么、去哪下。
+      # 不写死文件名：去 ComfyUI 的模型目录里按关键字找。实际装机时常见的几种"其实有、但没被找到"：
+      #   - Z-Image 的 ControlNet 放进了 controlnet/（它是 model patch，必须在 model_patches/）
+      #   - 用的是 GGUF 量化版（ComfyUI-GGUF 把它们列在 unet_gguf / clip_gguf 下，不在 diffusion_models）
+      #   - 用的是整合包 checkpoint（模型 + 文本编码器 + VAE 一个文件，在 checkpoints/）
+      #   - VAE 文件名不是 ae.safetensors
+      # 前三种直接支持；放错文件夹的，报错时明确说"在 X 里找到了，请移到 Y"。
+      ZIMAGE_RX = /z[-_ ]?image/i
       REQUIRED = {
-        unet: ['diffusion_models', /z[-_ ]?image[-_ ]?turbo/i, 'z_image_turbo_bf16.safetensors',
+        unet: ['diffusion_models', /z[-_ ]?image[-_ ]?turbo|z[-_ ]?image(?!.*(control|vae|patch))/i, 'z_image_turbo_bf16.safetensors',
                'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/diffusion_models/z_image_turbo_bf16.safetensors'],
-        clip: ['text_encoders', /qwen[-_ ]?3[-_ ]?4b/i, 'qwen_3_4b.safetensors',
+        clip: ['text_encoders', /qwen[-_ ]?3[-_ .]?4b/i, 'qwen_3_4b.safetensors',
                'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/text_encoders/qwen_3_4b.safetensors'],
-        vae: ['vae', /\A(ae|flux[-_]?ae|flux1?[-_]vae|z[-_]?image[-_]?vae)[^\/]*\.safetensors\z/i, 'ae.safetensors',
+        vae: ['vae', /\Aae[._\-]|flux|z[-_ ]?image|ultra[-_]?flux/i, 'ae.safetensors',
               'https://huggingface.co/Comfy-Org/z_image_turbo/resolve/main/split_files/vae/ae.safetensors'],
-        control: ['model_patches', /z[-_ ]?image.*control/i, 'Z-Image-Turbo-Fun-Controlnet-Union.safetensors',
+        control: ['model_patches', /z[-_ ]?image.*control|control.*z[-_ ]?image/i, 'Z-Image-Turbo-Fun-Controlnet-Union.safetensors',
                   'https://huggingface.co/alibaba-pai/Z-Image-Turbo-Fun-Controlnet-Union/resolve/main/Z-Image-Turbo-Fun-Controlnet-Union.safetensors']
       }.freeze
+      # 这些 VAE 名字里可能带 flux 等字样但跟 Z-Image 不兼容
+      VAE_EXCLUDE = /seedvr|sdxl|sd15|sd_?1|sd3|wan|qwen|hunyuan|ltx|cosmos|mochi|flux2|flux[-_.]?2/i
+      # "Z-Image-Turbo-Fun-Controlnet..." 也含 z-image-turbo 字样，找主模型时必须排除掉
+      EXCLUDE = { unet: /control|union|patch|vae|lora/i, vae: VAE_EXCLUDE }.freeze
+
+      # 按文件名找不到时，再去这些文件夹里看看是不是放错了地方
+      SEARCH_FOLDERS = %w[diffusion_models unet_gguf checkpoints text_encoders clip_gguf vae controlnet model_patches loras].freeze
 
       SEEDVR = {
         unet: ['diffusion_models', /seedvr2.*7b/i, /seedvr2.*3b/i, 'seedvr2_7b_int8_convrot.safetensors',
@@ -46,20 +59,33 @@ module AydinCreative
       SEEDVR_NODES = %w[SeedVR2Preprocess SeedVR2Conditioning SeedVR2PostProcessing VAEEncodeTiled VAEDecodeTiled].freeze
 
       # 同一类里有多个文件时的偏好：新版本 > 旧版本，bf16 > fp8（16GB 显存 bf16 能放下，画质更好）
-      def pick(list, rx)
-        hits = list.select { |f| File.basename(f.to_s) =~ rx }
+      def pick(list, rx, exclude = nil)
+        hits = list.select { |f| (b = base(f)) =~ rx && !(exclude && b =~ exclude) }
         hits.max_by do |f|
           n = f.to_s.downcase
           score = 0
           score += 4 if n =~ /2\.1|v2|union[-_]?2/
           score += 2 if n.include?('bf16')
           score += 1 if n.include?('fp8')
-          score -= 3 if n.include?('gguf')
+          score += 1 if n =~ /\Aae\./
           score
         end
       end
 
-      # 返回 { ok:, models: {...}, missing: [文字说明...], seedvr: {...} 或 nil }
+      # ComfyUI 在 Windows 上返回的相对路径用反斜杠
+      def base(f)
+        f.to_s.split(%r{[\\/]}).last.to_s
+      end
+
+      # 在别的文件夹里找同名/同类文件 → "在 X/ 里找到了 Y"
+      def found_elsewhere(client, rx, right_folder, exclude = nil)
+        SEARCH_FOLDERS.reject { |f| f == right_folder }.flat_map do |folder|
+          client.models(folder).select { |f| (b = base(f)) =~ rx && !(exclude && b =~ exclude) }.first(2).map { |f| "#{folder}/#{f}" }
+        end
+      end
+
+      # 返回 { ok:, models: {...}, missing: [文字说明...], seedvr: {...} 或 nil, found: {folder => [files]} }
+      # models 里 :loader 表示主模型怎么加载：:unet（标准）| :gguf | :ckpt（整合包，clip/vae 也从它来）
       def resolve(client)
         missing = []
         nodes_missing = ZIMAGE_NODES.reject { |n| client.node?(n) }
@@ -68,13 +94,48 @@ module AydinCreative
         end
 
         m = {}
-        REQUIRED.each do |key, (folder, rx, default_name, url)|
-          f = pick(client.models(folder), rx)
-          if f
-            m[key] = f
+        # 主模型：标准 safetensors → GGUF → 整合包 checkpoint
+        folder, rx, name, url = REQUIRED[:unet]
+        ex = EXCLUDE[:unet]
+        if (f = pick(client.models(folder), rx, ex))
+          m[:unet] = f
+          m[:loader] = :unet
+        elsif client.node?('UnetLoaderGGUF') && (f = pick(client.models('unet_gguf'), rx, ex))
+          m[:unet] = f
+          m[:loader] = :gguf
+        elsif (f = pick(client.models('checkpoints'), rx, ex))
+          m[:ckpt] = f
+          m[:loader] = :ckpt
+        else
+          missing << missing_line(client, :unet)
+        end
+
+        # 文本编码器 + VAE：整合包自带，不用单独找
+        unless m[:loader] == :ckpt
+          folder, rx, = REQUIRED[:clip]
+          if (f = pick(client.models(folder), rx))
+            m[:clip] = f
+            m[:clip_loader] = :clip
+          elsif client.node?('CLIPLoaderGGUF') && (f = pick(client.models('clip_gguf'), rx))
+            m[:clip] = f
+            m[:clip_loader] = :gguf
           else
-            missing << "#{folder}/#{default_name}  ←  #{url}"
+            missing << missing_line(client, :clip)
           end
+
+          folder, rx, = REQUIRED[:vae]
+          if (f = pick(client.models(folder), rx, EXCLUDE[:vae]))
+            m[:vae] = f
+          else
+            missing << missing_line(client, :vae)
+          end
+        end
+
+        folder, rx, = REQUIRED[:control]
+        if (f = pick(client.models(folder), rx))
+          m[:control] = f
+        else
+          missing << missing_line(client, :control)
         end
 
         seed = nil
@@ -85,7 +146,24 @@ module AydinCreative
           seed = { unet: unet, vae: vae } if unet && vae
         end
 
-        { ok: missing.empty?, models: m, missing: missing, seedvr: seed }
+        found = {}
+        SEARCH_FOLDERS.each { |fd| found[fd] = client.models(fd) }
+        { ok: missing.empty?, models: m, missing: missing, seedvr: seed, found: found }
+      end
+
+      def missing_line(client, key)
+        folder, rx, name, url = REQUIRED[key]
+        label = { unet: 'Z-Image Turbo 主模型', clip: '文本编码器 Qwen3-4B', vae: 'VAE', control: 'Z-Image ControlNet' }[key]
+        elsewhere = found_elsewhere(client, rx, folder, EXCLUDE[key])
+        gguf = elsewhere.select { |e| e.start_with?('unet_gguf/', 'clip_gguf/') }
+        if !gguf.empty? && elsewhere.size == gguf.size
+          "✗ #{label}：找到了 GGUF 版（#{gguf.map { |e| e.split('/', 2).last }.join('、')}），但 ComfyUI 里没装 ComfyUI-GGUF 插件。" \
+            "装上它（ComfyUI Manager 搜 GGUF），或者改下 safetensors 版：\n    #{url}"
+        elsif elsewhere.empty?
+          "✗ #{label}：没找到。下载放到 models/#{folder}/#{name}\n    #{url}"
+        else
+          "✗ #{label}：在 #{elsewhere.join('、')} 找到了，但它必须放在 models/#{folder}/ 里（移动过去后重启 ComfyUI）"
+        end
       end
 
       def seedvr_hint
@@ -105,10 +183,7 @@ module AydinCreative
         cn = (1.0 - 0.4 * t).round(3)
         stamp = Time.now.strftime('%Y%m%d_%H%M%S')
 
-        g = {
-          'unet' => { 'class_type' => 'UNETLoader', 'inputs' => { 'unet_name' => models[:unet], 'weight_dtype' => 'default' } },
-          'clip' => { 'class_type' => 'CLIPLoader', 'inputs' => { 'clip_name' => models[:clip], 'type' => 'lumina2', 'device' => 'default' } },
-          'vae' => { 'class_type' => 'VAELoader', 'inputs' => { 'vae_name' => models[:vae] } },
+        g = loader_nodes(models).merge(
           'patch' => { 'class_type' => 'ModelPatchLoader', 'inputs' => { 'name' => models[:control] } },
 
           'src' => { 'class_type' => 'LoadImage', 'inputs' => { 'image' => input_filename } },
@@ -126,22 +201,22 @@ module AydinCreative
           } },
           'edge' => { 'class_type' => 'Canny', 'inputs' => { 'image' => ['lines_s', 0], 'low_threshold' => 0.1, 'high_threshold' => 0.32 } },
           'cn' => { 'class_type' => 'QwenImageDiffsynthControlnet', 'inputs' => {
-            'model' => ['unet', 0], 'model_patch' => ['patch', 0], 'vae' => ['vae', 0], 'image' => ['edge', 0], 'strength' => cn
+            'model' => model_ref(models), 'model_patch' => ['patch', 0], 'vae' => vae_ref(models), 'image' => ['edge', 0], 'strength' => cn
           } },
           'ms' => { 'class_type' => 'ModelSamplingAuraFlow', 'inputs' => { 'model' => ['cn', 0], 'shift' => 3 } },
 
-          'pos' => { 'class_type' => 'CLIPTextEncode', 'inputs' => { 'clip' => ['clip', 0], 'text' => prompt } },
+          'pos' => { 'class_type' => 'CLIPTextEncode', 'inputs' => { 'clip' => clip_ref(models), 'text' => prompt } },
           # Turbo 是蒸馏模型，cfg=1，不用负面提示词（官方模板就是 ConditioningZeroOut）
           'neg' => { 'class_type' => 'ConditioningZeroOut', 'inputs' => { 'conditioning' => ['pos', 0] } },
-          'lat' => { 'class_type' => 'VAEEncode', 'inputs' => { 'pixels' => ['src_s', 0], 'vae' => ['vae', 0] } },
+          'lat' => { 'class_type' => 'VAEEncode', 'inputs' => { 'pixels' => ['src_s', 0], 'vae' => vae_ref(models) } },
           'ks' => { 'class_type' => 'KSampler', 'inputs' => {
             'model' => ['ms', 0], 'seed' => seed, 'steps' => denoise < 1.0 ? 10 : 8, 'cfg' => 1.0,
             'sampler_name' => 'res_multistep', 'scheduler' => 'simple',
             'positive' => ['pos', 0], 'negative' => ['neg', 0], 'latent_image' => ['lat', 0], 'denoise' => denoise
           } },
-          'dec' => { 'class_type' => 'VAEDecode', 'inputs' => { 'samples' => ['ks', 0], 'vae' => ['vae', 0] } },
+          'dec' => { 'class_type' => 'VAEDecode', 'inputs' => { 'samples' => ['ks', 0], 'vae' => vae_ref(models) } },
           'save' => { 'class_type' => 'SaveImage', 'inputs' => { 'images' => ['dec', 0], 'filename_prefix' => "SU_AI_Render/#{stamp}_zimage_#{tag}" } }
-        }
+        )
 
         # 看图识物（沿用 SDXL 管线里验证过的 gemma VLM）：构件名是乱码时，靠它告诉扩散模型
         # "这里是床不是沙发"。Qwen3 文本编码器能读长文本，直接拼在描述里，不用 SDXL 那种加权技巧。
@@ -178,6 +253,41 @@ module AydinCreative
                          'one or two sentences (for example: light oak floor, white lime-plaster walls, brushed brass ' \
                          'details, warm low evening sun). Do not describe the furniture layout, objects or composition. ' \
                          'No lists, no markdown.'
+
+      # 主模型 / 文本编码器 / VAE 的加载节点（标准、GGUF、整合包三种）
+      def loader_nodes(models)
+        g = {}
+        if models[:loader] == :ckpt
+          g['ckpt'] = { 'class_type' => 'CheckpointLoaderSimple', 'inputs' => { 'ckpt_name' => models[:ckpt] } }
+          return g
+        end
+        g['unet'] =
+          if models[:loader] == :gguf
+            { 'class_type' => 'UnetLoaderGGUF', 'inputs' => { 'unet_name' => models[:unet] } }
+          else
+            { 'class_type' => 'UNETLoader', 'inputs' => { 'unet_name' => models[:unet], 'weight_dtype' => 'default' } }
+          end
+        g['clip'] =
+          if models[:clip_loader] == :gguf
+            { 'class_type' => 'CLIPLoaderGGUF', 'inputs' => { 'clip_name' => models[:clip], 'type' => 'lumina2' } }
+          else
+            { 'class_type' => 'CLIPLoader', 'inputs' => { 'clip_name' => models[:clip], 'type' => 'lumina2', 'device' => 'default' } }
+          end
+        g['vae'] = { 'class_type' => 'VAELoader', 'inputs' => { 'vae_name' => models[:vae] } }
+        g
+      end
+
+      def model_ref(models)
+        models[:loader] == :ckpt ? ['ckpt', 0] : ['unet', 0]
+      end
+
+      def clip_ref(models)
+        models[:loader] == :ckpt ? ['ckpt', 1] : ['clip', 0]
+      end
+
+      def vae_ref(models)
+        models[:loader] == :ckpt ? ['ckpt', 2] : ['vae', 0]
+      end
 
       # ---- 第二阶段：SeedVR2 精修放大到目标分辨率 ------------------------------------
       # 先 lanczos 放到目标尺寸，SeedVR2 一步扩散补真实细节；PostProcessing 用 LAB 把颜色

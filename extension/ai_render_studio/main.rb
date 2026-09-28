@@ -130,9 +130,19 @@ module AydinCreative
       return unless client.online?
       r = PhotoBuilder.resolve(client)
       rlog "  models ok=#{r[:ok]} seedvr=#{!r[:seedvr].nil?} #{r[:models]}"
+      log_model_folders(r) unless r[:ok]
       to_js('models', { ok: r[:ok], missing: r[:missing], seedvr: !r[:seedvr].nil?, seedvr_hint: PhotoBuilder.seedvr_hint })
     rescue StandardError => e
       rlog "push_model_status ERROR: #{e.class}: #{e.message}"
+    end
+
+    # 找不到模型时，把 ComfyUI 各模型文件夹里实际有什么全部写进 render.log，方便对照排查
+    def log_model_folders(res)
+      rlog '  ---- Z-Image 模型检测没通过，ComfyUI 各文件夹实际内容：'
+      res[:missing].each { |line| rlog "  #{line.gsub("\n", ' ')}" }
+      (res[:found] || {}).each do |folder, files|
+        rlog "  [#{folder}] (#{files.size}) #{files.first(60).join(' | ')}"
+      end
     end
 
     # ================= 主面板 =================
@@ -444,6 +454,7 @@ module AydinCreative
       client = ComfyClient.new
       step(tr(:s_connect), 0.03) { raise tr(:err_comfy, client.base) unless client.online? }
       res = step(tr(:s_probe), 0.04) { PhotoBuilder.resolve(client) }
+      log_model_folders(res) unless res[:ok]
       unless res[:ok]
         raise "Z-Image 管线还缺东西（按下面补齐后重启 ComfyUI 再试；或在面板里把引擎切回 RealVisXL）：\n\n" +
               res[:missing].join("\n")
